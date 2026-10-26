@@ -4,7 +4,7 @@ import type { RootContent } from 'hast'
 import { toString } from 'hast-util-to-string'
 import { useI18n } from '../i18n'
 import { getRootBlocks, parseMarkdown } from '../lib/markdown'
-import type { PageConfig, SelectionSnapshot } from '../types'
+import type { PageConfig, SelectionMenuRequest, SelectionSnapshot } from '../types'
 
 interface MarkdownDocumentProps {
   markdown: string
@@ -17,6 +17,8 @@ interface MarkdownDocumentProps {
   onCommentOpen: (id: string) => void
   onRevisionOpen: (offset: number, x: number, y: number) => void
   onPageCount: (count: number) => void
+  /** 右键命中可标注的范围时上报，处理不了（无选区、也不在高亮 / 着色文字上）则上报 null。 */
+  onSelectionMenu: (request: SelectionMenuRequest | null) => void
 }
 
 const PAPER = {
@@ -147,6 +149,27 @@ function locateSourceOffset(node: Node, offset: number) {
   return before ? Number(before.dataset.sourceEnd) : null
 }
 
+/**
+ * 从右键落点往上找最近的 `<mark>` 与最近的「带 color 的 span」。
+ * 只认行内样式：`.md-source` 这类源码映射用 span 没有 color，不会被误判成着色文字。
+ */
+function nearestInlineColor(element: Node | null, boundary: HTMLElement) {
+  let mark: HTMLElement | null = null
+  let colorSpan: HTMLElement | null = null
+  let node = element instanceof Element ? element : element?.parentElement ?? null
+  while (node && node !== boundary) {
+    if (!mark && node.tagName === 'MARK') mark = node as HTMLElement
+    if (!colorSpan && node.tagName === 'SPAN' && (node as HTMLElement).style.color) colorSpan = node as HTMLElement
+    node = node.parentElement
+  }
+  return { mark, colorSpan }
+}
+
+function computedColor(element: HTMLElement | null, property: 'backgroundColor' | 'color') {
+  if (!element) return ''
+  return getComputedStyle(element)[property] ?? ''
+}
+
 export default function MarkdownDocument({
   markdown,
   config,
@@ -157,6 +180,7 @@ export default function MarkdownDocument({
   onCommentOpen,
   onRevisionOpen,
   onPageCount,
+  onSelectionMenu,
 }: MarkdownDocumentProps) {
   const { t } = useI18n()
   const tree = useMemo(() => parseMarkdown(markdown), [markdown])
@@ -218,6 +242,15 @@ export default function MarkdownDocument({
     }
   }, [blocks, config.paper, config.fontSize, config.lineHeight, contentHeight, viewMode, onPageCount])
 
+  /** 把 DOM Range 换算成源码偏移，失败返回 null（跨页跨块、命中保护区的选区都会落空）。 */
+  function snapshotFromRange(range: Range): SelectionSnapshot | null {
+    const start = locateSourceOffset(range.startContainer, range.startOffset)
+    const end = locateSourceOffset(range.endContainer, range.endOffset)
+    if (start === null || end === null || start >= end) return null
+    const rect = range.getBoundingClientRect()
+    return { text: range.toString(), start, end, top: rect.top, left: rect.left + rect.width / 2 }
+  }
+
   function handleSelection() {
     const selection = window.getSelection()
     if (!selection || selection.isCollapsed || !selection.rangeCount || !selection.toString().trim()) {
@@ -226,14 +259,43 @@ export default function MarkdownDocument({
     }
     const range = selection.getRangeAt(0)
     if (!viewportRef.current?.contains(range.commonAncestorContainer)) return
-    const start = locateSourceOffset(range.startContainer, range.startOffset)
-    const end = locateSourceOffset(range.endContainer, range.endOffset)
-    if (start === null || end === null || start >= end) {
-      onSelection(null)
-      return
+    const snapshot = snapshotFromRange(range)
+    onSelection(snapshot && snapshot.start < snapshot.end ? snapshot : null)
+  }
+
+  /**
+   * 右键：有选区就用选区；没有选区但落在高亮 / 着色文字上，就把整段高亮当作目标。
+   * 后者是「改高亮颜色」的主路径 —— 不必先用鼠标精确拖选。
+   */
+  function handleContextMenu(event: React.MouseEvent) {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const { mark, colorSpan } = nearestInlineColor(event.target as Node, viewport)
+    const native = window.getSelection()
+    let range: Range | null = null
+    if (native && !native.isCollapsed && native.rangeCount) {
+      const current = native.getRangeAt(0)
+      if (viewport.contains(current.commonAncestorContainer) && current.toString().trim()) range = current
     }
-    const rect = range.getBoundingClientRect()
-    onSelection({ text: selection.toString(), start, end, top: rect.top, left: rect.left + rect.width / 2 })
+    if (!range) {
+      const host = mark ?? colorSpan
+      // 空白处右键交还给浏览器原生菜单（复制 / 检查元素仍然可用）。
+      if (!host) return
+      range = document.createRange()
+      range.selectNodeContents(host)
+      native?.removeAllRanges()
+      native?.addRange(range.cloneRange())
+    }
+    const snapshot = snapshotFromRange(range)
+    if (!snapshot) return
+    event.preventDefault()
+    onSelectionMenu({
+      selection: snapshot,
+      highlight: computedColor(mark, 'backgroundColor'),
+      color: computedColor(colorSpan, 'color'),
+      x: event.clientX,
+      y: event.clientY,
+    })
   }
 
   function renderPageContent(content: RootContent[]) {
@@ -260,6 +322,7 @@ export default function MarkdownDocument({
       className={`document-viewport ${viewMode === 'continuous' ? 'is-continuous' : ''} ${revisionMode ? 'is-revising' : ''}`}
       onMouseUp={handleSelection}
       onClick={handleRevisionClick}
+      onContextMenu={handleContextMenu}
       onMouseLeave={() => {
         if (!window.getSelection()?.toString()) onSelection(null)
       }}

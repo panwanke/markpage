@@ -183,6 +183,29 @@ describe('选区落在高亮内部时不套娃', () => {
   })
 })
 
+describe('只取消某一层标注', () => {
+  it('取消高亮只脱掉 mark，其余格式原样保留', () => {
+    const source = '段落 <mark><span style="color:#6750a4">正文</span></mark> 结束'
+    expect(applyInlineFormat(source, selectionFor(source, '正文'), 'unhighlight'))
+      .toBe('段落 <span style="color:#6750a4">正文</span> 结束')
+  })
+
+  it('取消高亮不会把加粗一起清掉', () => {
+    const source = '段落 <mark>**正文**</mark> 结束'
+    expect(applyInlineFormat(source, selectionFor(source, '正文'), 'unhighlight')).toBe('段落 **正文** 结束')
+  })
+
+  it('取消文字颜色只脱掉 color span，高亮保留', () => {
+    const source = '段落 <mark><span style="color:#6750a4">正文</span></mark> 结束'
+    expect(applyInlineFormat(source, selectionFor(source, '正文'), 'uncolor')).toBe('段落 <mark>正文</mark> 结束')
+  })
+
+  it('选区只盖住半截时不动源码，不写出孤立的 </mark>', () => {
+    const source = '一段<mark>黄色高亮</mark>文字'
+    expect(applyInlineFormat(source, selectionFor(source, '亮</mark>文字'), 'unhighlight')).toBe(source)
+  })
+})
+
 describe('评论完整生命周期', () => {
   it('支持创建、回复、解决与删除，且保留原文', () => {
     const source = '# 测试\n\n这是一段需要讨论的正文。\n'

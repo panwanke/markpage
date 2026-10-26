@@ -8,6 +8,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeKatex from 'rehype-katex'
 import rehypeSlug from 'rehype-slug'
 import { rehypeHighlightLite } from './highlight'
+import { DEFAULT_HIGHLIGHT } from './palette'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { visit } from 'unist-util-visit'
 import { toString } from 'hast-util-to-string'
@@ -385,10 +386,10 @@ export function applyInlineFormat(
   // 已经是同一类包裹时，先脱掉旧标签再重新包裹 —— 换色是「替换」而不是「嵌套」。
   let wasHighlighted = false
   let expanded = false
-  if (format === 'highlight') {
+  if (format === 'highlight' || format === 'unhighlight') {
     expanded = expand(MARK_OPEN, MARK_CLOSE)
     wasHighlighted = expanded
-  } else if (format === 'color') {
+  } else if (format === 'color' || format === 'uncolor') {
     expanded = expand(SPAN_OPEN, SPAN_CLOSE)
   } else if (format === 'clear') {
     expanded = expand(ANY_OPEN, ANY_CLOSE)
@@ -414,6 +415,10 @@ export function applyInlineFormat(
         ? `<mark style="background-color:${option}">${stripMarkTags(inner)}</mark>`
         : `<mark>${stripMarkTags(inner)}</mark>`
       break
+    // 只脱掉一层标签：没扩到完整包裹说明选区只盖住半截，此时删标签会写出孤立的 `</mark>`，
+    // 所以原样返回，让调用方知道「这里没有可取消的格式」。
+    case 'unhighlight': replacement = expanded ? stripMarkTags(inner) : inner; break
+    case 'uncolor': replacement = expanded ? stripSpanTags(inner) : inner; break
     case 'code': replacement = `\`${inner}\``; break
     case 'color': replacement = `<span style="color:${option ?? '#6750a4'}">${stripSpanTags(inner)}</span>`; break
     case 'comment': replacement = `<comment id="${option}">${stripCommentTags(inner)}</comment>`; break
@@ -421,6 +426,7 @@ export function applyInlineFormat(
       replacement = stripInlineTags(inner)
       break
   }
+  if (replacement === inner) return markdown
   return markdown.slice(0, start) + replacement + markdown.slice(end)
 }
 
@@ -471,11 +477,11 @@ function rewriteInsideWrapper(
   format: InlineFormat | 'comment',
   option?: string,
 ): string | null {
-  const wrapper = format === 'color'
+  const wrapper = format === 'color' || format === 'uncolor'
     ? colorWrapper(markdown, start, end)
     : format === 'clear'
       ? enclosingWrapper(markdown, start, end, 'mark') ?? colorWrapper(markdown, start, end)
-      : format === 'highlight'
+      : format === 'highlight' || format === 'unhighlight'
         ? enclosingWrapper(markdown, start, end, 'mark')
         : null
   if (!wrapper) return null
@@ -484,7 +490,7 @@ function rewriteInsideWrapper(
   const closeTag = markdown.slice(wrapper.closeStart, wrapper.closeEnd)
   const isMark = /^<mark/i.test(openTag)
   const currentColor = isMark
-    ? readInlineColor(openTag, 'background-color') || '#fff0a8'
+    ? readInlineColor(openTag, 'background-color') || DEFAULT_HIGHLIGHT
     : readInlineColor(openTag, 'color')
 
   // 选的就是当前颜色：不动源码，免得白白拆成三段。
@@ -493,18 +499,76 @@ function rewriteInsideWrapper(
   const before = markdown.slice(wrapper.openEnd, start)
   const after = markdown.slice(end, wrapper.closeStart)
   const middle = markdown.slice(start, end)
-  // 无颜色参数 = 切换：这一段原本就是高亮，所以只留文字。
+
+  // 选区盖住了包裹里的全部可见文字（常见于右键整段命中）：直接重建这一整段。
+  // 走这条路而不是「拆三段」，是因为里面可能还嵌着别的标签，
+  // 按位置硬切会把 `<span>` 和 `</span>` 拆到不同的段里，写出不闭合的源码。
+  if (onlyMarkup(before) && onlyMarkup(after)) {
+    const inner = before + middle + after
+    const rebuilt = rebuildWhole(openTag + inner + closeTag, inner, format, option, isMark)
+    if (rebuilt === null) return null
+    return markdown.slice(0, wrapper.openStart) + rebuilt + markdown.slice(wrapper.closeEnd)
+  }
+
+  // 只盖住一部分：前后两段各自重新包一层同样的标签。
+  // 前后还带别的标签时不硬切（见上），交给常规包裹分支。
+  if (/[<>]/.test(before) || /[<>]/.test(after)) return null
+
+  // 无颜色参数 = 切换 / 取消：这一段原本就是高亮（或着色），所以只留文字。
   const replacement = format === 'clear'
     ? stripInlineTags(middle)
-    : isMark
-      ? (option ? `<mark style="background-color:${option}">${stripMarkTags(middle)}</mark>` : stripMarkTags(middle))
-      : `<span style="color:${option ?? '#6750a4'}">${stripSpanTags(middle)}</span>`
+    : format === 'uncolor'
+      ? stripSpanTags(middle)
+      : format === 'unhighlight'
+        ? stripMarkTags(middle)
+        : isMark
+          ? (option ? `<mark style="background-color:${option}">${stripMarkTags(middle)}</mark>` : stripMarkTags(middle))
+          : `<span style="color:${option ?? '#6750a4'}">${stripSpanTags(middle)}</span>`
 
   const parts: string[] = []
   if (before.trim()) parts.push(openTag + before + closeTag)
   parts.push(replacement)
   if (after.trim()) parts.push(openTag + after + closeTag)
   return markdown.slice(0, wrapper.openStart) + parts.join('') + markdown.slice(wrapper.closeEnd)
+}
+
+/**
+ * 除了空白与标记符号（标签、`**`、`~~`、反引号）之外没有别的内容。
+ * 用来判断「选区是不是盖住了包裹里的全部文字」—— `**正文**` 里选中的是「正文」，
+ * 前后的 `**` 只是标记，应该整体重建而不是按位置硬切。
+ */
+function onlyMarkup(value: string) {
+  return value.replace(/<[^>]*>/g, '').replace(/[*_~`]/g, '').trim() === ''
+}
+
+/**
+ * 整段重建：按要做的操作决定留哪层标签。
+ * 返回 null 表示这次操作和包裹类型对不上（例如对 `<mark>` 取消文字颜色），交给别的分支。
+ */
+function rebuildWhole(
+  whole: string,
+  inner: string,
+  format: InlineFormat | 'comment',
+  option: string | undefined,
+  isMark: boolean,
+) {
+  if (format === 'clear') return stripInlineTags(inner)
+  if (format === 'unhighlight') return isMark ? stripMarkTags(whole) : null
+  if (format === 'uncolor') return isMark ? null : stripSpanTags(whole)
+  if (format === 'highlight') {
+    if (!isMark) return null
+    return option
+      ? `<mark style="background-color:${option}">${stripMarkTags(inner)}</mark>`
+      : stripMarkTags(whole)
+  }
+  if (format === 'color') {
+    if (isMark) return null
+    return option
+      ? `<span style="color:${option}">${stripSpanTags(inner)}</span>`
+      : stripSpanTags(whole)
+  }
+  // bold / strikethrough / code / comment：保留原包裹，只重新包一层选中内容。
+  return null
 }
 
 /** 只认「带 color 的 span」，避免把 font-weight 这类包裹也拆开。 */

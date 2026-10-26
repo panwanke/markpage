@@ -51,7 +51,19 @@ export interface SelectionSnapshot {
   left: number
 }
 
-export type InlineFormat = 'bold' | 'strikethrough' | 'highlight' | 'code' | 'color' | 'clear'
+/** 内联标注。`unhighlight` / `uncolor` 只脱掉对应的那层标签，不动其他格式。 */
+export type InlineFormat = 'bold' | 'strikethrough' | 'highlight' | 'unhighlight' | 'code' | 'color' | 'uncolor' | 'clear'
+
+/** 正文右键命中：把选区换算成源码偏移，并带上当前的高亮 / 文字颜色。 */
+export interface SelectionMenuRequest {
+  selection: SelectionSnapshot
+  /** 选中范围的高亮底色（十六进制），空串表示没有高亮。 */
+  highlight: string
+  /** 选中范围的文字颜色（十六进制），空串表示没有着色。 */
+  color: string
+  x: number
+  y: number
+}
 
 /** 导出时对某一类内联标记的处理方式：保留 / 换成自定义标签 / 只留文字。 */
 export type ExportRuleMode = 'keep' | 'retag' | 'strip'

@@ -1,5 +1,6 @@
 import { Bold, CheckCheck, Code2, Eraser, FileDiff, Highlighter, MessageSquarePlus, Minus, PenLine, Strikethrough, Undo2 } from 'lucide-react'
 import { useI18n } from '../i18n'
+import { HIGHLIGHT_COLORS, TEXT_COLORS } from '../lib/palette'
 import type { InlineFormat } from '../types'
 
 export interface RevisionControls {
@@ -20,9 +21,6 @@ interface FormattingToolbarProps {
   onFormat: (format: InlineFormat, option?: string) => void
   onComment: () => void
 }
-
-const TEXT_COLORS = ['#6750a4', '#b3261e', '#146c2e', '#9a6700']
-const HIGHLIGHT_COLORS = ['#fff3a8', '#c9f2d4', '#cfe3ff', '#ffd8e6']
 
 export default function FormattingToolbar({ disabled = false, compact = false, revision, onFormat, onComment }: FormattingToolbarProps) {
   const { t } = useI18n()

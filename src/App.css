@@ -274,6 +274,30 @@ body.is-resizing-columns .source-editor { pointer-events: none; }
 .floating-toolbar::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 9px; height: 9px; background: white; border-right: 1px solid #e4e1ee; border-bottom: 1px solid #e4e1ee; transform: rotate(45deg); }
 .formatting-toolbar.is-compact .tool-button { width: calc(30px * var(--ui-width)); height: calc(30px * var(--ui-width)); }
 
+/* Context menu：正文选区与工作区列表共用 */
+.context-menu { position: fixed; z-index: 90; min-width: calc(206px * var(--ui-width)); max-width: calc(268px * var(--ui-width)); padding: 5px; border: 1px solid #e4e1ee; border-radius: 10px; background: white; box-shadow: 0 12px 34px rgba(35,31,60,.19); animation: toolbar-in .1s ease-out; outline: none; }
+.context-menu-head { padding: 5px 9px 6px; border-bottom: 1px solid #f0eff5; margin-bottom: 4px; }
+.context-menu-head strong { display: block; color: #5f606a; font-size: calc(10.5px * var(--ui-scale)); font-weight: 600; letter-spacing: .04em; }
+.context-menu-head small { display: block; margin-top: 3px; color: #9a9ba4; font-size: calc(10.5px * var(--ui-scale)); line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-menu-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: calc(6px * var(--ui-width)) calc(8px * var(--ui-width)); border-radius: 7px; color: #3c3d45; font-size: calc(12px * var(--ui-scale)); text-align: left; }
+.context-menu-item:hover:not(:disabled), .context-menu-item:focus-visible { background: #f2f0fb; outline: none; }
+.context-menu-item.is-danger { color: #b3261e; }
+.context-menu-item.is-danger:hover:not(:disabled), .context-menu-item.is-danger:focus-visible { background: #fdeceb; }
+.context-menu-item.is-active { color: var(--accent); }
+.context-menu-icon { width: 16px; height: 16px; display: grid; place-items: center; color: #7b7c88; flex: 0 0 16px; }
+.context-menu-item.is-danger .context-menu-icon { color: inherit; }
+.context-menu-label { flex: 1; }
+.context-menu-shortcut { color: #a9aab2; font-size: calc(10px * var(--ui-scale)); }
+.context-menu-separator { height: 1px; margin: 4px 6px; background: #efeff4; }
+.context-menu-colors { padding: 4px 9px 6px; }
+.context-menu-colors-label { display: block; color: #85868f; font-size: calc(10.5px * var(--ui-scale)); margin-bottom: 5px; }
+.context-menu-swatches { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.menu-swatch { width: calc(17px * var(--ui-width)); height: calc(17px * var(--ui-width)); padding: 0; border-radius: 50%; background: var(--swatch); box-shadow: inset 0 0 0 1px rgba(30,30,40,.12); position: relative; }
+.menu-swatch:hover { transform: scale(1.12); }
+.menu-swatch.is-active { box-shadow: 0 0 0 2px white, 0 0 0 3.5px var(--accent); }
+.menu-reset { padding: 2px 7px; border-radius: 20px; border: 1px solid #e6e5ee; color: #74727b; font-size: calc(10.5px * var(--ui-scale)); background: white; }
+.menu-reset:hover { border-color: #c9c2ea; color: var(--accent); background: #f7f5ff; }
+
 /* Comments */
 .comments-panel { width: calc(310px * var(--ui-width)); flex: 0 0 calc(310px * var(--ui-width)); min-height: 0; background: #fafafd; border-left: 1px solid var(--border); display: flex; flex-direction: column; }
 .panel-heading { height: 49px; flex: 0 0 49px; padding: 0 12px 0 16px; display: flex; align-items: center; justify-content: space-between; background: white; border-bottom: 1px solid var(--border); }
@@ -514,7 +538,7 @@ body.is-resizing-columns .source-editor { pointer-events: none; }
 @media print {
   body { overflow: visible; background: white; }
   .app-header, .tab-strip, .dock-sidebar, .comments-panel, .editor-toolbar, .status-bar, .floating-toolbar, .toast,
-  .source-editor-wrap, .split-resizer, .revision-popover { display: none !important; }
+  .source-editor-wrap, .split-resizer, .revision-popover, .context-menu { display: none !important; }
   .app-shell, .workspace, .editor-area, .editor-content, .document-viewport { display: block; height: auto; overflow: visible; background: white; padding: 0; }
   .paper-page { margin: 0; box-shadow: none; break-after: page; }
   .paper-page:last-child { break-after: auto; }

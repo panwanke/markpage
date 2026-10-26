@@ -31,7 +31,11 @@ button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid rgba(108, 92, 231, .45); outline-offset: 2px; }
-/* 选区必须足够显眼：黄色高亮底上的默认半透明紫几乎看不出来，会被误认为「不可选中」。 */
-::selection { background: rgba(108, 92, 231, .32); color: #17161d; }
+/* 选区必须一眼看得出来：半透明紫压在黄色高亮底上几乎不可见，会被误认为「选不中」。
+   改成实心紫 + 白字，任何背景（高亮、着色文字、评论锚点、修订标记）上都能拉开对比。 */
+::selection { background: #6c5ce7; color: #fff; }
 .markdown-body mark::selection, .markdown-body mark *::selection,
-.comment-anchor::selection, .comment-anchor *::selection { background: #b3a2f2; color: #17161d; }
+.comment-anchor::selection, .comment-anchor *::selection,
+.markdown-body ins::selection, .markdown-body ins *::selection,
+.markdown-body .rev-del::selection, .markdown-body .rev-del *::selection,
+.markdown-body span[style*="color"]::selection, .markdown-body span[style*="color"] *::selection { background: #5848cf; color: #fff; }

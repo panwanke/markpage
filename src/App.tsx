@@ -29,6 +29,7 @@ import SourceEditor from './components/SourceEditor'
 import GitHubStar from './components/GitHubStar'
 import ExportMenu from './components/ExportMenu'
 import ExportDialog from './components/ExportDialog'
+import SelectionMenu from './components/SelectionMenu'
 import DockSidebar from './components/DockSidebar'
 import type { PanelDescriptor } from './components/DockSidebar'
 import ExamplesPanel from './components/panels/ExamplesPanel'
@@ -82,6 +83,7 @@ import type {
   InlineFormat,
   MarkdownDocument as MarkdownDoc,
   PageConfig,
+  SelectionMenuRequest,
   SelectionSnapshot,
 } from './types'
 import './App.css'
@@ -92,6 +94,7 @@ export default function App() {
   const [settings, setSettings] = useState(loadSettings)
   const [activeId, setActiveId] = useState('')
   const [selection, setSelection] = useState<SelectionSnapshot | null>(null)
+  const [selectionMenu, setSelectionMenu] = useState<SelectionMenuRequest | null>(null)
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
   const [modal, setModal] = useState<'settings' | 'comment' | 'export' | 'revision' | null>(null)
   const [revisionPopover, setRevisionPopover] = useState<{ mark: RevisionMark; top: number; left: number } | null>(null)
@@ -227,13 +230,38 @@ export default function App() {
     setActivePage((page) => Math.min(Math.max(1, page), count))
   }, [])
 
-  const handleFormat = useCallback((format: InlineFormat, option?: string) => {
-    if (!selection || !activeDocument) return
-    updateActiveDocument(applyInlineFormat(markdown, selection, format, option))
+  /**
+   * 标注统一走这里：调用方给明确的选区，浮动工具条与右键菜单共用同一条写回链路。
+   * 写回后清掉选区，避免菜单 / 工具条留在屏幕上继续作用在旧范围上。
+   */
+  const applyFormatTo = useCallback((target: SelectionSnapshot, format: InlineFormat, option?: string) => {
+    if (!activeDocument) return
+    const next = applyInlineFormat(markdown, target, format, option)
     window.getSelection()?.removeAllRanges()
     setSelection(null)
+    setSelectionMenu(null)
+    if (next === markdown) {
+      notify(t('toast.formatNoChange'))
+      return
+    }
+    updateActiveDocument(next)
     notify(t('toast.formatApplied'))
-  }, [selection, activeDocument, markdown, updateActiveDocument, notify, t])
+  }, [activeDocument, markdown, updateActiveDocument, notify, t])
+
+  const handleFormat = useCallback((format: InlineFormat, option?: string) => {
+    if (selection) applyFormatTo(selection, format, option)
+  }, [selection, applyFormatTo])
+
+  const copySelection = useCallback((text: string) => {
+    navigator.clipboard.writeText(text)
+      .then(() => notify(t('toast.copied')))
+      .catch(() => notify(t('toast.copyFailed')))
+  }, [notify, t])
+
+  function closeSelectionMenu() {
+    setSelectionMenu(null)
+    setSelection(null)
+  }
 
   function switchMode(next: EditorMode) {
     if (next === mode) return
@@ -588,6 +616,7 @@ export default function App() {
                   onCommentOpen={locateComment}
                   onRevisionOpen={openRevision}
                   onPageCount={handlePageCount}
+                  onSelectionMenu={(request) => setSelectionMenu(request)}
                 />
               </div>
             )}
@@ -661,10 +690,32 @@ export default function App() {
         />}
       </div>
 
-      {selection && !modal && mode !== 'source' && (
+      {selection && !modal && mode !== 'source' && !selectionMenu && (
         <div ref={floatingToolbarRef} className="floating-toolbar" style={{ top: Math.max(116, selection.top - 54), left: toolbarLeft }}>
           <FormattingToolbar compact revision={revisionControls} onFormat={handleFormat} onComment={() => setModal('comment')} />
         </div>
+      )}
+
+      {selectionMenu && (
+        <SelectionMenu
+          x={selectionMenu.x}
+          y={selectionMenu.y}
+          selection={selectionMenu.selection}
+          highlight={selectionMenu.highlight}
+          color={selectionMenu.color}
+          onFormat={(format, option) => applyFormatTo(selectionMenu.selection, format, option)}
+          onComment={() => {
+            const target = selectionMenu.selection
+            setSelectionMenu(null)
+            setSelection(target)
+            setModal('comment')
+          }}
+          onCopy={() => {
+            copySelection(selectionMenu.selection.text)
+            closeSelectionMenu()
+          }}
+          onClose={closeSelectionMenu}
+        />
       )}
 
       {modal === 'settings' && <SettingsModal
