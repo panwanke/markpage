@@ -25,6 +25,7 @@ dist-ssr
 
 # WorkBuddy local project data (agent state, not source)
 .workbuddy/
+.workbuddy-ai/
 
 # Governance tooling (ARA-lite / proj-tracker)
 # ara.yaml is the project manifest — keep it tracked (it's the ARA contract).
