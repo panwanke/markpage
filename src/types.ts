@@ -7,6 +7,8 @@ export interface MarkdownDocument {
   createdAt: string
   updatedAt: string
   open: boolean
+  /** 绑定了本地文件夹里的文件时记下相对路径，改动会写回磁盘。 */
+  localPath?: string
 }
 
 export type PaperSize = 'A4' | 'Letter'

@@ -75,6 +75,19 @@ import {
   DEFAULT_SPLIT_RATIO,
 } from './lib/storage'
 import { createDefaultLayout, toggleSidebar } from './lib/layout'
+import {
+  clearFolderHandle,
+  hasWritePermission,
+  loadFolderHandle,
+  pickDirectory,
+  readLocalFile,
+  requestWritePermission,
+  saveFolderHandle,
+  scanDirectory,
+  supportsDirectoryPicker,
+  writeLocalFile,
+} from './lib/localfs'
+import type { LocalFileEntry } from './lib/localfs'
 import { PluginRegistry } from './plugins/registry'
 import { focusModePlugin } from './plugins/registry'
 import { useI18n } from './i18n'
@@ -105,9 +118,14 @@ export default function App() {
   const [activePage, setActivePage] = useState(1)
   const [toolbarLeft, setToolbarLeft] = useState(0)
   const [splitRatio, setSplitRatio] = useState(settings.splitRatio)
+  const [folder, setFolder] = useState<{ name: string; files: LocalFileEntry[]; writable: boolean } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const floatingToolbarRef = useRef<HTMLDivElement>(null)
   const splitDragRef = useRef<{ x: number; ratio: number; width: number } | null>(null)
+  const folderHandleRef = useRef<FileSystemDirectoryHandle | null>(null)
+  /** 磁盘上该文件当前的内容：内容一致就不再写盘，避免每次渲染都触发写入。 */
+  const localContentRef = useRef(new Map<string, string>())
+  const localTimerRef = useRef(new Map<string, number>())
 
   const openDocuments = documents.filter((document) => document.open)
   const activeDocument = documents.find((document) => document.id === activeId && document.open) ?? openDocuments[0]
@@ -205,6 +223,55 @@ export default function App() {
     setToast(message)
     window.setTimeout(() => setToast(''), 2200)
   }, [])
+
+  // 上次连过的本地文件夹自动接回来：句柄存在 IndexedDB 里，写权限要用户再点一次。
+  useEffect(() => {
+    if (!supportsDirectoryPicker()) return
+    let cancelled = false
+    const restore = async () => {
+      const handle = await loadFolderHandle()
+      if (!handle || cancelled) return
+      try {
+        const writable = await hasWritePermission(handle)
+        const files = await scanDirectory(handle)
+        if (cancelled) return
+        folderHandleRef.current = handle
+        setFolder({ name: handle.name, files, writable })
+        if (!writable) notify(t('localfs.needPermission', { name: handle.name }))
+      } catch {
+        // 目录被删掉或权限被撤销：静默放弃，用户点「打开文件夹」重新选即可。
+      }
+    }
+    void restore()
+    return () => { cancelled = true }
+    // 只在首次挂载时尝试恢复：notify / t 每帧都会变，不该让它反复重连文件夹。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 绑定到磁盘的文档改动后写回原文件；600ms 防抖让连续输入只落一次盘。
+  useEffect(() => {
+    const handles = new Map((folder?.files ?? []).map((file) => [file.path, file.handle]))
+    documents.forEach((document) => {
+      const path = document.localPath
+      if (!path) return
+      const handle = handles.get(path)
+      if (!handle) return
+      if (localContentRef.current.get(path) === document.markdown) return
+      const pending = localTimerRef.current.get(path)
+      if (pending) window.clearTimeout(pending)
+      const timer = window.setTimeout(async () => {
+        try {
+          await writeLocalFile(handle, document.markdown)
+          localContentRef.current.set(path, document.markdown)
+          setFolder((current) => (current && !current.writable ? { ...current, writable: true } : current))
+        } catch {
+          setFolder((current) => (current && current.writable ? { ...current, writable: false } : current))
+          notify(t('localfs.writeFailed', { name: document.name || path }))
+        }
+      }, 600)
+      localTimerRef.current.set(path, timer)
+    })
+  }, [documents, folder?.files, notify, t])
 
   // 浮动工具条按实测宽度收进视口：界面字号放大后它也会变宽，写死的边距会溢出屏幕。
   useLayoutEffect(() => {
@@ -519,6 +586,78 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
+  /** 选一个本地文件夹：内容直接来自磁盘，改动写回原文件。 */
+  async function connectFolder() {
+    if (!supportsDirectoryPicker()) {
+      notify(t('localfs.unsupported'))
+      return
+    }
+    const handle = await pickDirectory()
+    if (!handle) return
+    folderHandleRef.current = handle
+    await saveFolderHandle(handle)
+    const writable = await requestWritePermission(handle)
+    const files = await scanDirectory(handle)
+    setFolder({ name: handle.name, files, writable })
+    notify(t('localfs.connected', { name: handle.name, count: files.length }))
+  }
+
+  async function refreshFolder() {
+    const handle = folderHandleRef.current
+    if (!handle) return
+    const files = await scanDirectory(handle)
+    setFolder((current) => (current ? { ...current, files } : current))
+    notify(t('localfs.refreshed', { count: files.length }))
+  }
+
+  async function disconnectFolder() {
+    folderHandleRef.current = null
+    localContentRef.current.clear()
+    await clearFolderHandle()
+    setFolder(null)
+    notify(t('localfs.disconnected'))
+  }
+
+  async function permitFolderWrite() {
+    const handle = folderHandleRef.current
+    if (!handle) return
+    const granted = await requestWritePermission(handle)
+    setFolder((current) => (current ? { ...current, writable: granted } : current))
+    notify(granted ? t('localfs.permitted') : t('localfs.denied'))
+  }
+
+  async function openLocalFile(path: string) {
+    const entry = folder?.files.find((file) => file.path === path)
+    if (!entry) return
+    const existing = documents.find((document) => document.localPath === path)
+    if (existing?.open) {
+      openDocument(existing.id)
+      return
+    }
+    let content: string
+    try {
+      content = await readLocalFile(entry.handle)
+    } catch {
+      notify(t('localfs.readFailed', { name: entry.path }))
+      return
+    }
+    localContentRef.current.set(path, content)
+    if (existing) {
+      // 之前开过后来关掉了：以磁盘上的最新内容为准，而不是浏览器里的旧副本。
+      setDocuments((current) => current.map((document) => document.id === existing.id
+        ? { ...document, markdown: content, open: true, updatedAt: new Date().toISOString() }
+        : document))
+      setActiveId(existing.id)
+    } else {
+      const document: MarkdownDoc = { ...createDocument(content, entry.title), localPath: path }
+      setDocuments((current) => [...current, document])
+      setActiveId(document.id)
+    }
+    setSelection(null)
+    setSelectionMenu(null)
+    notify(t('localfs.opened', { name: entry.title }))
+  }
+
   function locateComment(id: string) {
     updateSettings({ showComments: true })
     ensureRendered()
@@ -563,6 +702,10 @@ export default function App() {
         <WorkspacePanel
           documents={documents}
           activeId={activeDocument?.id ?? ''}
+          activeLocalPath={activeDocument?.localPath ?? ''}
+          folder={folder
+            ? { name: folder.name, writable: folder.writable, files: folder.files.map((file) => ({ path: file.path, title: file.title })) }
+            : null}
           onOpen={openDocument}
           onNew={newDocument}
           onRename={renameDocument}
@@ -570,6 +713,11 @@ export default function App() {
           onExport={exportDocument}
           onClose={closeDocument}
           onDelete={deleteDocument}
+          onOpenFolder={connectFolder}
+          onRefreshFolder={refreshFolder}
+          onDisconnectFolder={disconnectFolder}
+          onPermitWrite={permitFolderWrite}
+          onOpenLocalFile={openLocalFile}
         />
       ),
     },

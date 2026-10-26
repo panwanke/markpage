@@ -97,7 +97,7 @@ button:disabled { cursor: default; opacity: .35; }
 .dock-resizer:hover { background: linear-gradient(90deg, transparent 2px, rgba(108,92,231,.4) 2px, rgba(108,92,231,.4) 4px, transparent 4px); }
 .dock-resizer:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .panel-scroll { padding: 7px 9px 12px; }
-.panel-toolbar { display: flex; justify-content: flex-end; padding: 1px 1px 5px; }
+.panel-toolbar { display: flex; justify-content: flex-end; gap: 3px; padding: 1px 1px 5px; }
 .panel-action { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border-radius: 5px; color: #8a8896; font-size: calc(10px * var(--ui-scale)); }
 .panel-action:hover { background: #f0eff5; color: var(--accent); }
 .document-list { display: flex; flex-direction: column; gap: 2px; }
@@ -106,6 +106,24 @@ button:disabled { cursor: default; opacity: .35; }
 .document-rename { flex: 1; }
 .document-rename input { width: 100%; padding: 3px 6px; border: 1px solid #c1b7ea; border-radius: 5px; background: white; color: #3c3d45; font-size: calc(12px * var(--ui-scale)); }
 .document-rename small { color: #a0a1aa; font-size: calc(10px * var(--ui-scale)); }
+.document-local-badge { margin-left: 4px; color: #8a7bce; vertical-align: -1px; }
+
+/* 本地文件夹：连上磁盘后的文件列表 */
+.local-folder { margin: 2px 0 10px; padding: 7px 7px 5px; border: 1px solid #e8e6f2; border-radius: 8px; background: #fbfaff; }
+.local-folder-head { display: flex; align-items: center; gap: 5px; color: #77727f; }
+.local-folder-head strong { flex: 1; min-width: 0; color: #55506b; font-size: calc(11.5px * var(--ui-scale)); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.local-folder-head button { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; color: #9a95a8; }
+.local-folder-head button:hover { background: #eeecfa; color: var(--accent); }
+.local-folder-badge { padding: 1px 5px; border-radius: 20px; background: #f0eef7; color: #8b8798; font-size: calc(9.5px * var(--ui-scale)); }
+.local-folder-badge.is-writable { background: #e8f6ee; color: #2f7a53; }
+.local-folder-permit { width: 100%; margin: 6px 0 2px; padding: 4px 6px; display: flex; align-items: center; justify-content: center; gap: 4px; border: 1px dashed #c8bfe9; border-radius: 6px; background: white; color: #6b5bb8; font-size: calc(10.5px * var(--ui-scale)); }
+.local-folder-permit:hover { background: #f4f1ff; }
+.local-file-list { margin-top: 5px; max-height: 168px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.local-file-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 6px; border-radius: 5px; color: #6f6a7c; font-size: calc(11px * var(--ui-scale)); text-align: left; }
+.local-file-item span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.local-file-item:hover { background: #f1eefb; color: #4f4478; }
+.local-file-item.active { background: #eae6fa; color: #5648b5; font-weight: 600; }
+.local-file-empty { margin: 7px 2px 2px; color: #a0a1aa; font-size: calc(10.5px * var(--ui-scale)); line-height: 1.6; }
 .document-list-item:hover { background: #f0eff5; }
 .document-list-item.active { background: #eeecfa; color: var(--accent); }
 .document-list-item > span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
