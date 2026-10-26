@@ -296,9 +296,23 @@ export function applyInlineFormat(
 
   // 已经是同一类包裹时，先脱掉旧标签再重新包裹 —— 换色是「替换」而不是「嵌套」。
   let wasHighlighted = false
-  if (format === 'highlight') wasHighlighted = expand(MARK_OPEN, MARK_CLOSE)
-  else if (format === 'color') expand(SPAN_OPEN, SPAN_CLOSE)
-  else if (format === 'clear') expand(ANY_OPEN, ANY_CLOSE)
+  let expanded = false
+  if (format === 'highlight') {
+    expanded = expand(MARK_OPEN, MARK_CLOSE)
+    wasHighlighted = expanded
+  } else if (format === 'color') {
+    expanded = expand(SPAN_OPEN, SPAN_CLOSE)
+  } else if (format === 'clear') {
+    expanded = expand(ANY_OPEN, ANY_CLOSE)
+  }
+
+  // 没扩出去，说明选区落在包裹「内部」（典型场景：双击只选中一个汉字）。
+  // 此时再包一层会得到 <mark>甲<mark style=…>乙</mark>丙</mark>：内层颜色胜出，
+  // 外层既改不回来也删不干净，所以把原文拆成「前 / 选中 / 后」三段，只改写选中那段。
+  if (!expanded) {
+    const rewritten = rewriteInsideWrapper(markdown, start, end, format, option)
+    if (rewritten !== null) return rewritten
+  }
 
   const inner = markdown.slice(start, end)
   let replacement = inner
@@ -320,6 +334,96 @@ export function applyInlineFormat(
       break
   }
   return markdown.slice(0, start) + replacement + markdown.slice(end)
+}
+
+interface Wrapper {
+  openStart: number
+  openEnd: number
+  closeStart: number
+  closeEnd: number
+}
+
+/** 找到把 [start, end) 完整包住的最内层同类标签（没有则返回 null）。 */
+function enclosingWrapper(markdown: string, start: number, end: number, tag: 'mark' | 'span'): Wrapper | null {
+  const pattern = new RegExp(`<${tag}(?:\\s[^>]*)?>|</${tag}>`, 'gi')
+  const stack: { openStart: number; openEnd: number }[] = []
+  let found: Wrapper | null = null
+  for (const match of markdown.matchAll(pattern)) {
+    const at = match.index ?? 0
+    if (!match[0].startsWith('</')) {
+      stack.push({ openStart: at, openEnd: at + match[0].length })
+      continue
+    }
+    const open = stack.pop()
+    if (!open) continue
+    if (open.openEnd <= start && at >= end) {
+      // 文档顺序遍历，最后命中的就是最内层那个。
+      found = { ...open, closeStart: at, closeEnd: at + match[0].length }
+    }
+  }
+  return found
+}
+
+function readInlineStyle(openTag: string) {
+  return /style\s*=\s*(["'])([^"']*)\1/i.exec(openTag)?.[2] ?? ''
+}
+
+function readInlineColor(openTag: string, property: string) {
+  return new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`, 'i').exec(readInlineStyle(openTag))?.[1].trim().toLowerCase() ?? ''
+}
+
+/**
+ * 选区落在包裹内部时的改写：保留前后两段原样式，只把选中那段换成新样式。
+ * 返回 null 表示不适用（交给常规的「整体包裹」分支）。
+ */
+function rewriteInsideWrapper(
+  markdown: string,
+  start: number,
+  end: number,
+  format: InlineFormat | 'comment',
+  option?: string,
+): string | null {
+  const wrapper = format === 'color'
+    ? colorWrapper(markdown, start, end)
+    : format === 'clear'
+      ? enclosingWrapper(markdown, start, end, 'mark') ?? colorWrapper(markdown, start, end)
+      : format === 'highlight'
+        ? enclosingWrapper(markdown, start, end, 'mark')
+        : null
+  if (!wrapper) return null
+
+  const openTag = markdown.slice(wrapper.openStart, wrapper.openEnd)
+  const closeTag = markdown.slice(wrapper.closeStart, wrapper.closeEnd)
+  const isMark = /^<mark/i.test(openTag)
+  const currentColor = isMark
+    ? readInlineColor(openTag, 'background-color') || '#fff0a8'
+    : readInlineColor(openTag, 'color')
+
+  // 选的就是当前颜色：不动源码，免得白白拆成三段。
+  if (option && currentColor && option.toLowerCase() === currentColor) return markdown
+
+  const before = markdown.slice(wrapper.openEnd, start)
+  const after = markdown.slice(end, wrapper.closeStart)
+  const middle = markdown.slice(start, end)
+  // 无颜色参数 = 切换：这一段原本就是高亮，所以只留文字。
+  const replacement = format === 'clear'
+    ? stripInlineTags(middle)
+    : isMark
+      ? (option ? `<mark style="background-color:${option}">${stripMarkTags(middle)}</mark>` : stripMarkTags(middle))
+      : `<span style="color:${option ?? '#6750a4'}">${stripSpanTags(middle)}</span>`
+
+  const parts: string[] = []
+  if (before.trim()) parts.push(openTag + before + closeTag)
+  parts.push(replacement)
+  if (after.trim()) parts.push(openTag + after + closeTag)
+  return markdown.slice(0, wrapper.openStart) + parts.join('') + markdown.slice(wrapper.closeEnd)
+}
+
+/** 只认「带 color 的 span」，避免把 font-weight 这类包裹也拆开。 */
+function colorWrapper(markdown: string, start: number, end: number) {
+  const wrapper = enclosingWrapper(markdown, start, end, 'span')
+  if (!wrapper) return null
+  return readInlineColor(markdown.slice(wrapper.openStart, wrapper.openEnd), 'color') ? wrapper : null
 }
 
 function stripMarkTags(value: string) {

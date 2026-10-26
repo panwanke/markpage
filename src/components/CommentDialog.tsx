@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { MessageSquarePlus, X } from 'lucide-react'
+import { useEscape } from '../lib/useEscape'
 
 interface CommentDialogProps {
   quote: string
@@ -10,6 +11,7 @@ interface CommentDialogProps {
 
 export default function CommentDialog({ quote, userName, onCancel, onSubmit }: CommentDialogProps) {
   const [content, setContent] = useState('')
+  useEscape(onCancel)
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
       <section className="dialog comment-dialog" role="dialog" aria-modal="true" aria-label="添加评论">

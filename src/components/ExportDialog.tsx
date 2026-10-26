@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Check, Copy, Download, RotateCcw, SlidersHorizontal, X } from 'lucide-react'
-import { buildExport, collectHighlightColors, collectTextColors, CUSTOM_EXPORT_DEFAULT } from '../lib/export'
+import { buildExport, collectHighlightColors, collectTextColors, CUSTOM_EXPORT_DEFAULT, isDirectExport } from '../lib/export'
+import { useEscape } from '../lib/useEscape'
 import type { ExportColorMapping, ExportConfig, ExportElementRule } from '../types'
 
 interface ExportDialogProps {
@@ -97,6 +98,7 @@ export default function ExportDialog({ name, markdown, config, onConfig, onDownl
   const highlightColors = useMemo(() => collectHighlightColors(markdown), [markdown])
   const textColors = useMemo(() => collectTextColors(markdown), [markdown])
   const preview = useMemo(() => buildExport(markdown, config), [markdown, config])
+  useEscape(onClose)
 
   function patch(patchValue: Partial<ExportConfig>) {
     onConfig({ ...config, ...patchValue })
@@ -118,7 +120,7 @@ export default function ExportDialog({ name, markdown, config, onConfig, onDownl
         <header className="export-dialog-head">
           <div className="dialog-heading">
             <span className="dialog-icon"><SlidersHorizontal size={18} /></span>
-            <div><h2>自定义导出</h2><p>把墨页的标记映射成你自己的 HTML 约定，右侧实时预览。</p></div>
+            <div><h2>自定义导出</h2><p>把墨页的标记映射成你自己的 HTML 约定，右侧实时预览。</p>{isDirectExport(config) && <p className="export-hint">当前映射与「直接导出」等价，产物与源文件逐字节一致。</p>}</div>
           </div>
           <button className="icon-button" title="恢复初始映射" onClick={() => onConfig({ ...CUSTOM_EXPORT_DEFAULT })}><RotateCcw size={17} /></button>
           <button className="icon-button" title="关闭" onClick={onClose}><X size={19} /></button>

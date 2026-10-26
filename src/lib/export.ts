@@ -46,15 +46,18 @@ export const CUSTOM_EXPORT_DEFAULT: ExportConfig = {
 
 const PAGE_KEYS = ['header', 'footer', 'paper', 'fontSize', 'lineHeight']
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/
+const CALLOUT = /^> \[!comment ([\w-]+)(?:\s+(?:resolved))?\][ \t]*\r?\n(?:>[^\n]*(?:\r?\n|$))*/gim
+const CALLOUT_MARK = '\u0000'
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/** 属性解析同时接受单引号与双引号：从别处粘来的 HTML 不该被当成「没写属性」。 */
 function parseAttributes(source: string) {
   const attributes: Record<string, string> = {}
-  for (const match of source.matchAll(/([\w-]+)\s*=\s*"([^"]*)"/g)) {
-    attributes[match[1].toLowerCase()] = match[2]
+  for (const match of source.matchAll(/([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    attributes[match[1].toLowerCase()] = match[2] ?? match[3] ?? ''
   }
   return attributes
 }
@@ -64,24 +67,98 @@ function readStyleValue(style: string, property: string) {
   return match?.[1].trim().toLowerCase() ?? ''
 }
 
-/** 抽出文档里出现过的全部高亮底色（裸 `<mark>` 记作默认黄）。 */
-export function collectHighlightColors(markdown: string): string[] {
-  const colors = new Set<string>()
-  for (const match of markdown.matchAll(/<mark(\s[^>]*)?>/gi)) {
-    const style = parseAttributes(match[1] ?? '').style ?? ''
-    colors.add(readStyleValue(style, 'background-color') || DEFAULT_HIGHLIGHT_COLOR)
-  }
-  return [...colors]
+/** 高亮底色兼容 `background-color` 与 `background` 简写。 */
+function readBackgroundColor(style: string) {
+  const explicit = readStyleValue(style, 'background-color')
+  if (explicit) return explicit
+  const shorthand = readStyleValue(style, 'background')
+  return shorthand ? shorthand.split(/\s+/)[0] : ''
 }
 
-/** 抽出文档里出现过的全部文字颜色。 */
-export function collectTextColors(markdown: string): string[] {
-  const colors = new Set<string>()
-  for (const match of markdown.matchAll(/<span\s+style="([^"]*)"\s*>/gi)) {
-    const color = readStyleValue(match[1], 'color')
-    if (color) colors.add(color)
+/**
+ * 只有真的填了 class 或 style 才算「有映射」。
+ * 用户在弹窗里改过某个颜色又清空，会留下 `{className:'', style:''}` 的真值对象，
+ * 若只判 `!mapping` 就会把原来的行内样式一并抹掉。
+ */
+function hasMapping(mapping: ExportColorMapping | undefined) {
+  return Boolean(mapping && (mapping.className.trim() || mapping.style.trim()))
+}
+
+// ---------------------------------------------------------------------------
+// 行内标签树：正则逐对替换在嵌套标签上会提前闭合，这里先建树再自内向外改写。
+// ---------------------------------------------------------------------------
+
+interface TextNode {
+  kind: 'text'
+  raw: string
+}
+
+interface ElementNode {
+  kind: 'element'
+  tagName: string
+  openRaw: string
+  closeRaw: string
+  children: InlineNode[]
+  /** 没有配对闭标签的元素整段原样保留，避免把未闭合的标记「修」坏。 */
+  closed: boolean
+}
+
+type InlineNode = TextNode | ElementNode
+
+const INLINE_TAG = /<(\/?)(mark|span|comment)(\s[^>]*)?>/gi
+
+function parseInline(source: string): InlineNode[] {
+  const root: InlineNode[] = []
+  const stack: ElementNode[] = []
+  const push = (node: InlineNode) => {
+    if (stack.length) stack[stack.length - 1].children.push(node)
+    else root.push(node)
   }
-  return [...colors]
+  let cursor = 0
+  for (const match of source.matchAll(INLINE_TAG)) {
+    const at = match.index ?? 0
+    if (at > cursor) push({ kind: 'text', raw: source.slice(cursor, at) })
+    cursor = at + match[0].length
+    const tagName = match[2].toLowerCase()
+    if (match[1] !== '/') {
+      const element: ElementNode = { kind: 'element', tagName, openRaw: match[0], closeRaw: '', children: [], closed: false }
+      push(element)
+      stack.push(element)
+      continue
+    }
+    let index = stack.length - 1
+    while (index >= 0 && stack[index].tagName !== tagName) index -= 1
+    if (index < 0) {
+      push({ kind: 'text', raw: match[0] })
+      continue
+    }
+    // 中间没闭合的兄弟保持 closed=false，随外层一起原样输出。
+    stack.length = index + 1
+    const element = stack.pop() as ElementNode
+    element.closeRaw = match[0]
+    element.closed = true
+  }
+  if (cursor < source.length) push({ kind: 'text', raw: source.slice(cursor) })
+  return root
+}
+
+function serialize(nodes: InlineNode[]): string {
+  return nodes
+    .map((node) => (node.kind === 'text' ? node.raw : node.openRaw + serialize(node.children) + node.closeRaw))
+    .join('')
+}
+
+function walkElements(nodes: InlineNode[], visit: (node: ElementNode) => void) {
+  for (const node of nodes) {
+    if (node.kind !== 'element') continue
+    visit(node)
+    walkElements(node.children, visit)
+  }
+}
+
+/** 行内代码里的标签必须原样保留，按反引号把一行切成「代码 / 非代码」片段。 */
+function splitInlineCode(line: string) {
+  return line.split(/(`+[^`]*`+)/g)
 }
 
 interface ElementSpec {
@@ -97,91 +174,108 @@ function renderElement(spec: ElementSpec, inner: string) {
   const className = (mapping?.className ?? rule.className).trim()
   const style = (mapping?.style ?? rule.style).trim()
   const parts = [tag]
-  if (className) parts.push(`class="${className}"`)
-  if (style) parts.push(`style="${style}"`)
-  Object.entries(spec.extraAttributes).forEach(([name, value]) => parts.push(`${name}="${value}"`))
+  if (className) parts.push(`class="${className.replace(/"/g, '')}"`)
+  if (style) parts.push(`style="${style.replace(/"/g, '')}"`)
+  Object.entries(spec.extraAttributes).forEach(([name, value]) => parts.push(`${name}="${value.replace(/"/g, '')}"`))
   return `<${parts.join(' ')}>${inner}</${tag}>`
 }
 
-function transformComments(line: string, rule: ExportElementRule) {
-  return line.replace(/<comment(\s[^>]*)?>([\s\S]*?)<\/comment>/gi, (original, rawAttributes: string | undefined, inner: string) => {
-    if (rule.mode === 'strip') return inner
-    const attributes = parseAttributes(rawAttributes ?? '')
-    const id = attributes.id
-    if (rule.mode === 'keep' && !rule.className.trim() && !rule.style.trim()) return original
-    return renderElement({
-      tagName: 'comment',
-      rule,
-      mapping: undefined,
-      // 换成自定义标签后 <comment id> 不再是语义标签，保留成 data 属性以免信息丢失。
-      extraAttributes: rule.mode === 'retag' && id ? { 'data-comment-id': id } : {},
-    }, inner)
+function transformComment(node: ElementNode, rule: ExportElementRule, inner: string) {
+  if (rule.mode === 'strip') return inner
+  const original = node.openRaw + inner + node.closeRaw
+  const id = parseAttributes(node.openRaw).id
+  if (rule.mode === 'keep' && !rule.className.trim() && !rule.style.trim()) return original
+  return renderElement({
+    tagName: 'comment',
+    rule,
+    mapping: undefined,
+    // 换成自定义标签后 <comment id> 不再是语义标签，保留成 data 属性以免信息丢失。
+    extraAttributes: rule.mode === 'retag' && id ? { 'data-comment-id': id } : {},
+  }, inner)
+}
+
+function transformHighlight(node: ElementNode, rule: ExportElementRule, mappings: Record<string, ExportColorMapping>, inner: string) {
+  if (rule.mode === 'strip') return inner
+  const original = node.openRaw + inner + node.closeRaw
+  const style = parseAttributes(node.openRaw).style ?? ''
+  const color = readBackgroundColor(style) || DEFAULT_HIGHLIGHT_COLOR
+  const mapping = mappings[color]
+  if (rule.mode === 'keep' && !hasMapping(mapping) && !rule.className.trim() && !rule.style.trim()) return original
+  return renderElement({ tagName: 'mark', rule, mapping: hasMapping(mapping) ? mapping : undefined, extraAttributes: {} }, inner)
+}
+
+function transformColor(node: ElementNode, rule: ExportElementRule, mappings: Record<string, ExportColorMapping>, inner: string) {
+  const original = node.openRaw + inner + node.closeRaw
+  const color = readStyleValue(parseAttributes(node.openRaw).style ?? '', 'color')
+  // 不是文字颜色 span（例如只设了 font-weight）就原样保留，避免误伤。
+  if (!color) return original
+  if (rule.mode === 'strip') return inner
+  const mapping = mappings[color]
+  if (rule.mode === 'keep' && !hasMapping(mapping) && !rule.className.trim() && !rule.style.trim()) return original
+  return renderElement({ tagName: 'span', rule, mapping: hasMapping(mapping) ? mapping : undefined, extraAttributes: {} }, inner)
+}
+
+function transformNodes(nodes: InlineNode[], config: ExportConfig): InlineNode[] {
+  return nodes.map((node) => {
+    if (node.kind === 'text') return node
+    // 未闭合的元素整段原样输出，内部也不做改写。
+    if (!node.closed) return node
+    const inner = serialize(transformNodes(node.children, config))
+    if (node.tagName === 'mark') return { kind: 'text', raw: transformHighlight(node, config.highlight, config.highlightColors, inner) }
+    if (node.tagName === 'span') return { kind: 'text', raw: transformColor(node, config.color, config.textColors, inner) }
+    return { kind: 'text', raw: transformComment(node, config.comment, inner) }
   })
 }
 
-function transformHighlights(line: string, rule: ExportElementRule, mappings: Record<string, ExportColorMapping>) {
-  return line.replace(/<mark(\s[^>]*)?>([\s\S]*?)<\/mark>/gi, (original, rawAttributes: string | undefined, inner: string) => {
-    if (rule.mode === 'strip') return inner
-    const attributes = parseAttributes(rawAttributes ?? '')
-    const originalStyle = attributes.style ?? ''
-    const color = readStyleValue(originalStyle, 'background-color') || DEFAULT_HIGHLIGHT_COLOR
-    const mapping = mappings[color]
-    const untouched = rule.mode === 'keep' && !mapping && !rule.className.trim() && !rule.style.trim()
-    if (untouched) return original
-    return renderElement({
-      tagName: 'mark',
-      rule,
-      mapping,
-      extraAttributes: {},
-    }, inner)
-  })
-}
-
-function transformColors(line: string, rule: ExportElementRule, mappings: Record<string, ExportColorMapping>) {
-  return line.replace(/<span\s+style="([^"]*)"\s*>([\s\S]*?)<\/span>/gi, (original, style: string, inner: string) => {
-    const color = readStyleValue(style, 'color')
-    if (rule.mode === 'strip') return inner
-    // 不是文字颜色 span（例如只设了 font-weight）就交给用户原样保留，避免误伤。
-    if (!color) return original
-    const mapping = mappings[color]
-    const untouched = rule.mode === 'keep' && !mapping && !rule.className.trim() && !rule.style.trim()
-    if (untouched) return original
-    return renderElement({
-      tagName: 'span',
-      rule,
-      mapping,
-      extraAttributes: {},
-    }, inner)
-  })
-}
-
-/** 只处理正文行：围栏代码块与行内代码里的标签必须原样保留。 */
 function transformLine(line: string, config: ExportConfig) {
-  return line
-    .split(/(`+[^`]*`+)/g)
-    .map((chunk) => {
-      if (chunk.startsWith('`')) return chunk
-      const next = transformComments(chunk, config.comment)
-      return transformColors(transformHighlights(next, config.highlight, config.highlightColors), config.color, config.textColors)
-    })
+  return splitInlineCode(line)
+    .map((chunk) => (chunk.startsWith('`') ? chunk : serialize(transformNodes(parseInline(chunk), config))))
     .join('')
 }
 
-function transformBody(markdown: string, config: ExportConfig) {
+/**
+ * 逐行遍历正文，标出哪些行属于代码（围栏块或缩进代码块），
+ * 这些行里的 `<mark>` / `<comment>` 一律不碰。
+ */
+function* bodyLines(markdown: string) {
   let fence: string | null = null
-  return markdown
-    .split('\n')
-    .map((line) => {
-      const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)
-      if (marker) {
-        const character = marker[1][0]
-        if (!fence) fence = character
-        else if (fence === character) fence = null
-        return line
-      }
-      return fence ? line : transformLine(line, config)
-    })
-    .join('\n')
+  let indented = false
+  let previousBlank = true
+  for (const line of markdown.split('\n')) {
+    const fenceMarker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)
+    if (fenceMarker) {
+      const character = fenceMarker[1][0]
+      if (!fence) fence = character
+      else if (fence === character) fence = null
+      indented = false
+      previousBlank = false
+      yield { line, isCode: true }
+      continue
+    }
+    if (fence) {
+      yield { line, isCode: true }
+      continue
+    }
+    const blank = !line.trim()
+    // 缩进代码块只能紧接空行或上一行代码开始，否则是段落的懒续行。
+    if (/^(?: {4}|\t)/.test(line) && (indented || previousBlank)) {
+      indented = true
+      yield { line, isCode: true }
+      previousBlank = false
+      continue
+    }
+    if (!blank) indented = false
+    previousBlank = blank
+    yield { line, isCode: indented }
+  }
+}
+
+function transformBody(markdown: string, config: ExportConfig) {
+  const lines: string[] = []
+  for (const { line, isCode } of bodyLines(markdown)) {
+    lines.push(isCode ? line : transformLine(line, config))
+  }
+  return lines.join('\n')
 }
 
 function transformFrontmatter(markdown: string, mode: ExportConfig['frontmatter']) {
@@ -202,12 +296,17 @@ function transformFrontmatter(markdown: string, mode: ExportConfig['frontmatter'
   return `---\n${kept}\n---\n${rest.replace(/^\n+/, '')}`
 }
 
+/**
+ * 删掉 `> [!comment …]` 评论块。只在删除处收口：
+ * 原来无条件把全文 `\n{3,}` 压成 `\n\n`，会把用户拿空行做的视觉分隔一起吃掉。
+ */
 function stripCallouts(markdown: string) {
-  const withoutCallouts = markdown.replace(
-    /^> \[!comment ([\w-]+)(?:\s+(?:resolved))?\][ \t]*\r?\n(?:>[^\n]*(?:\r?\n|$))*/gim,
-    '',
-  )
-  return withoutCallouts.replace(/\n{3,}/g, '\n\n').replace(/\n{2,}$/, '\n')
+  const marked = markdown.replace(CALLOUT, CALLOUT_MARK)
+  if (!marked.includes(CALLOUT_MARK)) return markdown
+  return marked
+    .replace(new RegExp(`[ \\t]*\\n*${CALLOUT_MARK}\\n*[ \\t]*`, 'g'), '\n\n')
+    .replace(/^\n+/, '')
+    .replace(/\n+$/, '\n')
 }
 
 /**
@@ -221,12 +320,44 @@ export function buildExport(markdown: string, config: ExportConfig): string {
   return next
 }
 
+/** 文档里出现过的高亮底色（裸 `<mark>` 记作默认黄）。代码块内的不算。 */
+export function collectHighlightColors(markdown: string): string[] {
+  return collectColors(markdown, (node) => {
+    if (node.tagName !== 'mark') return null
+    return readBackgroundColor(parseAttributes(node.openRaw).style ?? '') || DEFAULT_HIGHLIGHT_COLOR
+  })
+}
+
+/** 文档里出现过的文字颜色。代码块内的不算。 */
+export function collectTextColors(markdown: string): string[] {
+  return collectColors(markdown, (node) => {
+    if (node.tagName !== 'span') return null
+    return readStyleValue(parseAttributes(node.openRaw).style ?? '', 'color') || null
+  })
+}
+
+function collectColors(markdown: string, pick: (node: ElementNode) => string | null) {
+  const colors = new Set<string>()
+  for (const { line, isCode } of bodyLines(markdown)) {
+    if (isCode) continue
+    for (const chunk of splitInlineCode(line)) {
+      if (chunk.startsWith('`')) continue
+      walkElements(parseInline(chunk), (node) => {
+        if (!node.closed) return
+        const color = pick(node)
+        if (color) colors.add(color)
+      })
+    }
+  }
+  return [...colors]
+}
+
 export function isDirectExport(config: ExportConfig) {
   return config.comment.mode === 'keep' && !config.comment.className && !config.comment.style
     && config.highlight.mode === 'keep' && !config.highlight.className && !config.highlight.style
     && config.color.mode === 'keep' && !config.color.className && !config.color.style
     && config.callouts === 'keep'
     && config.frontmatter === 'keep'
-    && Object.keys(config.highlightColors).length === 0
-    && Object.keys(config.textColors).length === 0
+    && !Object.values(config.highlightColors).some(hasMapping)
+    && !Object.values(config.textColors).some(hasMapping)
 }

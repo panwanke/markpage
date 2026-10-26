@@ -5,6 +5,8 @@
   /* 外观设置会覆写这三个变量：界面字体、界面字号缩放、正文字体。 */
   --ui-font: Inter, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --ui-scale: 1.15;
+  /* 侧栏 / 评论面板的宽度倍数：以默认 115% 为基准，默认档尺寸保持不变。 */
+  --ui-width: calc(var(--ui-scale) / 1.15);
   --doc-font: Georgia, "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", SimSun, serif;
   font-family: var(--ui-font);
   color: #292b32;

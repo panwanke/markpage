@@ -24,7 +24,7 @@ export default function FormattingToolbar({ disabled = false, compact = false, o
       <button className="tool-button" title="高亮（再次点击取消高亮）" {...action(() => onFormat('highlight'))}><Highlighter size={17} /></button>
       {!compact && <button className="tool-button" title="行内代码" {...action(() => onFormat('code'))}><Code2 size={17} /></button>}
       <span className="toolbar-separator" />
-      <div className="color-tools" title="高亮底色">
+      <div className="color-tools highlight-colors" title="高亮底色">
         {HIGHLIGHT_COLORS.map((color) => (
           <button
             key={color}
@@ -36,7 +36,7 @@ export default function FormattingToolbar({ disabled = false, compact = false, o
           />
         ))}
       </div>
-      <div className="color-tools" title="文字颜色">
+      <div className="color-tools text-colors" title="文字颜色">
         {TEXT_COLORS.map((color) => (
           <button
             key={color}

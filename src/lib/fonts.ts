@@ -62,7 +62,7 @@ export function fontStack(options: FontOption[], value: string) {
 }
 
 export const UI_SCALE_MIN = 1
-export const UI_SCALE_MAX = 1.6
+export const UI_SCALE_MAX = 1.8
 
 export function clampUiScale(value: unknown) {
   const scale = typeof value === 'number' && Number.isFinite(value) ? value : 1.15

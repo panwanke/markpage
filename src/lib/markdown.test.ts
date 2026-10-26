@@ -146,6 +146,43 @@ describe('选区标注写回', () => {
   })
 })
 
+describe('选区落在高亮内部时不套娃', () => {
+  it('只选中高亮里的一段并改色，会拆成前后两段而不是嵌套', () => {
+    const source = '一句<mark>可改色的高亮</mark>结束'
+    const next = applyInlineFormat(source, selectionFor(source, '改色'), 'highlight', '#c9f2d4')
+    expect(next).toBe('一句<mark>可</mark><mark style="background-color:#c9f2d4">改色</mark><mark>的高亮</mark>结束')
+  })
+
+  it('只选中高亮里的一段并取消高亮，只脱掉那一段', () => {
+    const source = '一句<mark style="background-color:#c9f2d4">可改色的高亮</mark>结束'
+    expect(applyInlineFormat(source, selectionFor(source, '改色'), 'highlight'))
+      .toBe('一句<mark style="background-color:#c9f2d4">可</mark>改色<mark style="background-color:#c9f2d4">的高亮</mark>结束')
+  })
+
+  it('只选中高亮里的一段并清除格式，只清那一段', () => {
+    const source = '一句<mark>可改色的高亮</mark>结束'
+    expect(applyInlineFormat(source, selectionFor(source, '改色'), 'clear'))
+      .toBe('一句<mark>可</mark>改色<mark>的高亮</mark>结束')
+  })
+
+  it('选中的就是当前颜色时不改源码', () => {
+    const source = '一句<mark style="background-color:#c9f2d4">可改色的高亮</mark>结束'
+    expect(applyInlineFormat(source, selectionFor(source, '改色'), 'highlight', '#c9f2d4')).toBe(source)
+  })
+
+  it('只选中文字颜色 span 里的一段并换色，同样拆段', () => {
+    const source = '段落 <span style="color:#6750a4">重点内容</span> 结束'
+    const next = applyInlineFormat(source, selectionFor(source, '内容'), 'color', '#b3261e')
+    expect(next).toBe('段落 <span style="color:#6750a4">重点</span><span style="color:#b3261e">内容</span> 结束')
+  })
+
+  it('font-weight 这类非颜色 span 不会被当成换色目标', () => {
+    const source = '段落 <span style="font-weight:600">重点内容</span> 结束'
+    const next = applyInlineFormat(source, selectionFor(source, '内容'), 'color', '#b3261e')
+    expect(next).toBe('段落 <span style="font-weight:600">重点<span style="color:#b3261e">内容</span></span> 结束')
+  })
+})
+
 describe('评论完整生命周期', () => {
   it('支持创建、回复、解决与删除，且保留原文', () => {
     const source = '# 测试\n\n这是一段需要讨论的正文。\n'

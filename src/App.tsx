@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronLeft,
@@ -66,7 +66,9 @@ export default function App() {
   const [focusMode, setFocusMode] = useState(false)
   const [pageCount, setPageCount] = useState(1)
   const [activePage, setActivePage] = useState(1)
+  const [toolbarLeft, setToolbarLeft] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const floatingToolbarRef = useRef<HTMLDivElement>(null)
 
   const openDocuments = documents.filter((document) => document.open)
   const activeDocument = documents.find((document) => document.id === activeId && document.open) ?? openDocuments[0]
@@ -142,6 +144,14 @@ export default function App() {
     setToast(message)
     window.setTimeout(() => setToast(''), 2200)
   }, [])
+
+  // 浮动工具条按实测宽度收进视口：界面字号放大后它也会变宽，写死的边距会溢出屏幕。
+  useLayoutEffect(() => {
+    if (!selection) return
+    const half = (floatingToolbarRef.current?.offsetWidth ?? 380) / 2
+    const margin = half + 12
+    setToolbarLeft(Math.min(window.innerWidth - margin, Math.max(margin, selection.left)))
+  }, [selection])
 
   const updateActiveDocument = useCallback((nextMarkdown: string, name?: string) => {
     const id = activeDocument?.id
@@ -442,7 +452,7 @@ export default function App() {
       </div>
 
       {selection && !modal && settings.editorMode === 'rendered' && (
-        <div className="floating-toolbar" style={{ top: Math.max(116, selection.top - 54), left: Math.min(window.innerWidth - 190, Math.max(190, selection.left)) }}>
+        <div ref={floatingToolbarRef} className="floating-toolbar" style={{ top: Math.max(116, selection.top - 54), left: toolbarLeft }}>
           <FormattingToolbar compact onFormat={handleFormat} onComment={() => setModal('comment')} />
         </div>
       )}

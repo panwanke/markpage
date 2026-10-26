@@ -7,6 +7,7 @@ import {
   CUSTOM_EXPORT_DEFAULT,
   DEFAULT_HIGHLIGHT_COLOR,
   DIRECT_EXPORT,
+  isDirectExport,
 } from './export'
 import type { ExportConfig } from '../types'
 
@@ -117,5 +118,110 @@ describe('导出：颜色收集', () => {
 
   it('收集文字颜色', () => {
     expect(collectTextColors(SOURCE)).toEqual(['#b3261e'])
+  })
+})
+
+describe('导出：空映射不能抹掉原始样式', () => {
+  it('清空某个颜色的 class / style 后，高亮保持原样', () => {
+    const source = 'x <mark style="background-color:#fff0a8">黄</mark> y\n'
+    const result = buildExport(source, withMapping({
+      highlightColors: { [DEFAULT_HIGHLIGHT_COLOR]: { className: '', style: '' } },
+    }))
+    expect(result).toBe(source)
+  })
+
+  it('清空某个文字颜色的映射后，span 保持原样', () => {
+    const source = 'x <span style="color:#b3261e">红</span> y\n'
+    const result = buildExport(source, withMapping({
+      textColors: { '#b3261e': { className: '', style: '' } },
+    }))
+    expect(result).toBe(source)
+  })
+
+  it('空映射不会让自定义导出退化成「直接导出」的判定误报', () => {
+    const directWith = (patch: Partial<ExportConfig>): ExportConfig => ({ ...DIRECT_EXPORT, ...patch })
+    expect(isDirectExport(directWith({ highlightColors: { '#fff0a8': { className: '', style: '' } } }))).toBe(true)
+    expect(isDirectExport(directWith({ highlightColors: { '#fff0a8': { className: 'hl', style: '' } } }))).toBe(false)
+  })
+})
+
+describe('导出：评论块只在删除处收口', () => {
+  it('没有评论块时，正文里的连续空行原样保留', () => {
+    const source = 'a\n\n\n\nb\n'
+    expect(buildExport(source, CLEAN_EXPORT)).toBe(source)
+  })
+
+  it('删掉评论块后，两侧只留一个空行', () => {
+    const source = 'a\n\n> [!comment c-1]\n> **甲** · 2026-10-26\n> 内容\n\nb\n'
+    expect(buildExport(source, CLEAN_EXPORT)).toBe('a\n\nb\n')
+  })
+
+  it('夹在正文中间的多个连续空行不受评论块删除影响', () => {
+    const source = 'a\n\n\n\nb\n\n> [!comment c-1]\n> **甲** · 2026-10-26\n> 内容\n\nc\n'
+    expect(buildExport(source, CLEAN_EXPORT)).toBe('a\n\n\n\nb\n\nc\n')
+  })
+})
+
+describe('导出：只处理颜色 span，不误伤其它 span', () => {
+  it('纯净导出保留 font-weight 这类非颜色 span', () => {
+    const source = '前 <span style="font-weight:600">加粗</span> 后\n'
+    expect(buildExport(source, CLEAN_EXPORT)).toBe(source)
+  })
+
+  it('嵌套 span 时结构不被拆散', () => {
+    const source = '<span style="color:#b3261e">红<span style="font-weight:600">粗</span>字</span>\n'
+    expect(buildExport(source, CLEAN_EXPORT)).toBe('红<span style="font-weight:600">粗</span>字\n')
+  })
+
+  it('嵌套 mark 自内向外改写，标签仍然配对', () => {
+    const source = '<mark>外<mark style="background-color:#c9f2d4">内</mark>层</mark>\n'
+    const result = buildExport(source, withMapping({
+      highlightColors: { '#c9f2d4': { className: 'hl-green', style: '' } },
+    }))
+    expect(result).toBe('<mark>外<mark class="hl-green">内</mark>层</mark>\n')
+  })
+})
+
+describe('导出：属性与样式写法的兼容性', () => {
+  it('识别单引号属性', () => {
+    const source = "x <mark style='background-color:#c9f2d4'>绿</mark> y\n"
+    const result = buildExport(source, withMapping({
+      highlightColors: { '#c9f2d4': { className: 'hl-green', style: '' } },
+    }))
+    expect(result).toBe('x <mark class="hl-green">绿</mark> y\n')
+  })
+
+  it('识别 background 简写，不把它当成默认黄', () => {
+    const source = 'x <mark style="background:#c9f2d4">绿</mark> y\n'
+    const result = buildExport(source, withMapping({
+      highlightColors: { '#c9f2d4': { className: 'hl-green', style: '' } },
+    }))
+    expect(result).toBe('x <mark class="hl-green">绿</mark> y\n')
+  })
+
+  it('缩进代码块里的标签不处理', () => {
+    const source = '正文\n\n    <mark>缩进代码</mark>\n\n尾部\n'
+    expect(buildExport(source, CLEAN_EXPORT)).toBe(source)
+  })
+
+  it('未闭合的标记原样保留', () => {
+    const source = 'x <mark>没闭合\n'
+    expect(buildExport(source, CLEAN_EXPORT)).toBe(source)
+  })
+})
+
+describe('导出：颜色清单不包含代码块里的标记', () => {
+  it('围栏代码块与缩进代码块都不参与颜色收集', () => {
+    const source = [
+      '正文 <mark style="background-color:#c9f2d4">绿</mark>',
+      '',
+      '```html',
+      '<mark style="background-color:#ff0000">代码里的红</mark>',
+      '```',
+      '',
+      '    <mark style="background-color:#00ff00">缩进里的绿</mark>',
+      '',
+    ].join('\n')
+    expect(collectHighlightColors(source)).toEqual(['#c9f2d4'])
   })
 })

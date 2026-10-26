@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Braces, Check, FileCog, Palette, Puzzle, RotateCcw, Type, UserRound, X } from 'lucide-react'
 import { DOC_FONTS, UI_FONTS, UI_SCALE_MAX, UI_SCALE_MIN } from '../lib/fonts'
+import { useEscape } from '../lib/useEscape'
 import type { PageConfig } from '../types'
 
 interface SettingsModalProps {
@@ -20,8 +21,9 @@ type SettingsTab = 'general' | 'appearance' | 'page' | 'plugins'
 const SCALE_PRESETS = [
   { value: 1, label: '紧凑' },
   { value: 1.15, label: '标准' },
-  { value: 1.3, label: '较大' },
-  { value: 1.45, label: '超大' },
+  { value: 1.35, label: '较大' },
+  { value: 1.6, label: '超大' },
+  { value: 1.8, label: '特大' },
 ]
 
 export default function SettingsModal({
@@ -36,6 +38,7 @@ export default function SettingsModal({
   onClose,
 }: SettingsModalProps) {
   const [tab, setTab] = useState<SettingsTab>('general')
+  useEscape(onClose)
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-label="设置">
