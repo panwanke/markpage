@@ -2,6 +2,8 @@
 
 本地优先的 Markdown 排版阅读与批注应用。Markdown 源文件是唯一的真相源：排版、标注、页面设置与评论全部随 `.md` 一起导出。
 
+**在线使用**：<https://panwanke.github.io/markpage/> —— 无需安装，打开即用。文档只存在浏览器本地，不上传任何服务器。
+
 ```bash
 npm install
 npm run dev      # 开发预览 http://127.0.0.1:5173
@@ -45,3 +47,7 @@ src/
   plugins/            插件 API 类型与注册表（专注模式为内置示例）
   data/examples.ts    示例库加载
 ```
+
+## 部署
+
+`npm run build` 产出 `dist/` 纯静态文件，由 `.github/workflows/deploy.yml` 在推送到 `main` 时自动构建并发布到 GitHub Pages，无需提交构建产物。`vite.config.ts` 的 `base: './'` 使用相对路径，因此同一份构建产物也能直接放到 Vercel、Netlify 或任意子路径下托管。
