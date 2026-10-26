@@ -43,7 +43,8 @@ npm run lint     # 静态检查
 ```
 src/
   lib/markdown.ts     渲染管线、源码位置映射、标注与评论的写回
-  lib/highlight.ts    精简版代码高亮插件（仅注册常用语言）
+  lib/highlight.ts    精简版代码高亮插件（仅注册常用语言；新增语言须同步 vite.config.ts 的
+                      optimizeDeps.include —— 语言文件是 CJS，不预打包 dev 会白屏，有测试守护）
   lib/export.ts       三档导出：标签映射、颜色映射、Frontmatter 裁剪
   lib/fonts.ts        界面 / 正文字体栈与字号缩放边界
   lib/storage.ts      本地文档与偏好存储
