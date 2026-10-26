@@ -9,6 +9,17 @@ import type { MarkdownDocument, WorkspaceSettings } from '../types'
 const DOCUMENTS_KEY = 'markpage.documents.v1'
 const SETTINGS_KEY = 'markpage.settings.v1'
 
+/** 双栏视图里源码栏的默认占比与边界。 */
+export const DEFAULT_SPLIT_RATIO = 0.42
+export const SPLIT_RATIO_MIN = 0.22
+export const SPLIT_RATIO_MAX = 0.75
+
+export function clampSplitRatio(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, value))
+    : DEFAULT_SPLIT_RATIO
+}
+
 export const DEFAULT_SETTINGS: WorkspaceSettings = {
   // 留空即匿名：评论署名与头像都回落到当前语言的「匿名用户」，不预设任何人的名字。
   userName: '',
@@ -16,6 +27,8 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   layout: createDefaultLayout(),
   viewMode: 'paged',
   editorMode: 'rendered',
+  splitRatio: DEFAULT_SPLIT_RATIO,
+  revisionMode: false,
   showComments: true,
   uiFont: 'system',
   uiScale: 1.15,
@@ -65,6 +78,9 @@ export function loadSettings(): WorkspaceSettings {
       locale: normalizeLocale(merged.locale),
       layout,
       uiScale: clampUiScale(merged.uiScale),
+      splitRatio: clampSplitRatio(merged.splitRatio),
+      revisionMode: merged.revisionMode === true,
+      editorMode: merged.editorMode === 'source' || merged.editorMode === 'split' ? merged.editorMode : 'rendered',
     }
   } catch {
     return DEFAULT_SETTINGS

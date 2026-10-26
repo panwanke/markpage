@@ -147,6 +147,22 @@ button:disabled { cursor: default; opacity: .35; }
 .view-switch button.active { background: #eeecfa; color: var(--accent); }
 .toolbar-dot { position: absolute; right: 4px; top: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
 .editor-content { flex: 1; min-height: 0; display: flex; }
+.editor-pane { flex: 1; min-width: 0; display: flex; }
+/* 双栏：左排版右源码，中间一条可拖动的分隔条 */
+.split-resizer { flex: 0 0 9px; position: relative; cursor: col-resize; background: #f3f4f6; touch-action: none; }
+.split-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: #e2e2e8; }
+.split-resizer:hover::after, body.is-resizing-columns .split-resizer::after { background: var(--accent); width: 2px; left: 3.5px; }
+body.is-resizing-columns { cursor: col-resize; user-select: none; }
+body.is-resizing-columns .source-editor { pointer-events: none; }
+/* 半屏宽度下纸张边距收窄一档，否则一屏只能读到两三个字 */
+.editor-content.mode-split .editor-pane { min-width: 300px; }
+.editor-content.mode-split .source-editor-wrap { flex: 0 1 auto; min-width: 240px; }
+.editor-content.mode-split .document-viewport { padding: 18px 16px 60px; }
+.editor-content.mode-split .page-content { padding: 46px 30px 50px; }
+.editor-content.mode-split .page-running-header,
+.editor-content.mode-split .page-running-footer { left: 30px; right: 30px; }
+.editor-content.mode-split .page-running-header { top: 14px; }
+.editor-content.mode-split .page-running-footer { bottom: 12px; }
 .document-viewport { width: 100%; overflow: auto; padding: 34px 34px 80px; scroll-behavior: smooth; position: relative; background-color: #f3f4f6; background-image: radial-gradient(#dddde3 .55px, transparent .55px); background-size: 12px 12px; }
 .paper-page { margin: 0 auto 30px; background: #fff; box-shadow: 0 3px 9px rgba(30,31,42,.06), 0 16px 38px rgba(30,31,42,.08); position: relative; flex: 0 0 auto; scroll-margin-top: 20px; }
 .page-running-header, .page-running-footer { position: absolute; left: 72px; right: 72px; display: flex; justify-content: space-between; align-items: center; color: #a0a0a6; font-size: 8px; letter-spacing: .07em; z-index: 1; }
@@ -209,8 +225,39 @@ button:disabled { cursor: default; opacity: .35; }
 
 /* Source */
 .source-editor-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #202129; }
+.source-editor-wrap.is-compact .source-editor { padding: 20px 22px 60px; }
 .source-editor-meta { height: 35px; flex: 0 0 35px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #32333d; color: #777985; font-size: calc(10.5px * var(--ui-scale)); letter-spacing: .12em; }
+.source-editor-meta .revision-live { color: #6fd39a; letter-spacing: .06em; }
 .source-editor { flex: 1; width: 100%; resize: none; border: 0; outline: 0; padding: 24px max(24px, calc((100% - 860px)/2)); background: #202129; color: #d7d5e1; caret-color: #b3a6ff; font: 13px/1.85 "SFMono-Regular", Consolas, monospace; tab-size: 2; }
+
+/* Revision marks */
+.markdown-body ins.rev-ins, .markdown-body ins { color: #146c2e; text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 2px; background: rgba(20,108,46,.07); border-radius: 2px; }
+.markdown-body del.rev-del { color: #b3261e; text-decoration: line-through; text-decoration-thickness: 1.5px; background: rgba(179,38,30,.06); border-radius: 2px; }
+.document-viewport.is-revising .rev-ins, .document-viewport.is-revising .rev-del { cursor: pointer; transition: background .12s, box-shadow .12s; }
+.document-viewport.is-revising .rev-ins:hover, .document-viewport.is-revising .rev-del:hover { background: #eef3ff; box-shadow: 0 0 0 2px #dbe6ff; }
+.revision-popover { position: fixed; z-index: 80; transform: translateX(-50%); width: 248px; padding: 10px 11px; background: white; border: 1px solid #e4e1ee; border-radius: 10px; box-shadow: 0 12px 34px rgba(35,31,60,.18); animation: toolbar-in .12s ease-out; }
+.revision-popover-kind { display: inline-flex; align-items: center; gap: 5px; color: #8b8794; font-size: calc(10px * var(--ui-scale)); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.revision-dot { width: 6px; height: 6px; border-radius: 50%; background: #1f8a4c; }
+.revision-popover.is-delete .revision-dot { background: #c0392b; }
+.revision-popover-text { margin: 6px 0 9px; color: #55525f; font-size: calc(11.5px * var(--ui-scale)); line-height: 1.6; word-break: break-word; }
+.revision-popover-actions { display: flex; gap: 6px; }
+.revision-popover-actions button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 28px; border-radius: 6px; font-size: calc(11px * var(--ui-scale)); font-weight: 600; }
+.revision-accept { color: #146c2e; background: #e9f6ee; }
+.revision-accept:hover { background: #d9efdf; }
+.revision-reject { color: #b3261e; background: #fdeceb; }
+.revision-reject:hover { background: #fbdcd9; }
+.revision-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 10px; color: #8a6d1f; background: #fdf3d8; font-size: calc(10.5px * var(--ui-scale)); }
+.revision-chip.is-on { color: #146c2e; background: #e9f6ee; }
+.revision-chip:hover { filter: brightness(.97); }
+.revision-icon { color: #146c2e; background: #e9f6ee; }
+.revision-quote { border-left-color: #c0392b; }
+.revision-toggle { position: relative; }
+.revision-toggle.is-on { color: #146c2e; background: #e9f6ee; }
+.revision-badge { position: absolute; top: 1px; right: 1px; min-width: 13px; height: 13px; padding: 0 3px; display: grid; place-items: center; border-radius: 7px; background: #d98324; color: white; font-size: calc(8px * var(--ui-scale)); font-weight: 700; line-height: 1; }
+.revision-mark, .revision-accept-all, .revision-reject-all { color: #146c2e; }
+.revision-accept-all { color: #1f8a4c; }
+.revision-reject-all { color: #b3261e; }
+.formatting-toolbar.is-revising { padding: 2px 4px 2px 2px; border-radius: 8px; background: #f2fbf5; }
 .status-bar { height: calc(30px * var(--ui-scale)); flex: 0 0 auto; padding: 0 12px; border-top: 1px solid var(--border); background: #fff; color: #7d7e88; display: flex; align-items: center; justify-content: space-between; font-size: calc(11.5px * var(--ui-scale)); position: relative; z-index: 20; }
 .status-bar > div { display: flex; align-items: center; gap: 11px; }
 .status-save-dot { width: 5px; height: 5px; border-radius: 50%; background: #5baa7d; }
@@ -459,7 +506,8 @@ button:disabled { cursor: default; opacity: .35; }
 
 @media print {
   body { overflow: visible; background: white; }
-  .app-header, .tab-strip, .dock-sidebar, .comments-panel, .editor-toolbar, .status-bar, .floating-toolbar, .toast { display: none !important; }
+  .app-header, .tab-strip, .dock-sidebar, .comments-panel, .editor-toolbar, .status-bar, .floating-toolbar, .toast,
+  .source-editor-wrap, .split-resizer, .revision-popover { display: none !important; }
   .app-shell, .workspace, .editor-area, .editor-content, .document-viewport { display: block; height: auto; overflow: visible; background: white; padding: 0; }
   .paper-page { margin: 0; box-shadow: none; break-after: page; }
   .paper-page:last-child { break-after: auto; }
