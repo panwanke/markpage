@@ -494,6 +494,11 @@ body.is-resizing-columns .source-editor { pointer-events: none; }
 .api-tags span { padding: 6px 8px; border: 1px solid #e5e1ee; border-radius: 5px; color: #766d88; background: #faf9fc; font: 8px Consolas, monospace; }
 .toast { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 120; display: flex; align-items: center; gap: 7px; padding: 10px 15px; border-radius: 8px; color: white; background: #34323e; box-shadow: 0 8px 24px rgba(30,28,40,.2); font-size: calc(11px * var(--ui-scale)); animation: toast-in .18s ease-out; }
 .toast svg { color: #9de0b9; }
+/* 拖放提示：盖住窗口但不吃鼠标事件，松手就落到下面的 document 上 */
+.drop-overlay { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; background: rgba(243,241,251,.66); backdrop-filter: blur(1.5px); pointer-events: none; animation: toolbar-in .1s ease-out; }
+.drop-card { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 26px 36px; border: 2px dashed #b3a5ea; border-radius: 16px; background: white; color: #52489a; box-shadow: 0 20px 54px rgba(35,31,60,.18); }
+.drop-card strong { font-size: calc(14px * var(--ui-scale)); font-weight: 600; }
+.drop-card span { color: #8b8798; font-size: calc(11.5px * var(--ui-scale)); }
 .focus-mode .document-identity { max-width: 500px; margin: 0 auto; }
 
 @keyframes pulse { 50% { opacity: .35; } }
@@ -560,7 +565,7 @@ body.is-resizing-columns .source-editor { pointer-events: none; }
 @media print {
   body { overflow: visible; background: white; }
   .app-header, .tab-strip, .dock-sidebar, .comments-panel, .editor-toolbar, .status-bar, .floating-toolbar, .toast,
-  .source-editor-wrap, .split-resizer, .revision-popover, .context-menu { display: none !important; }
+  .source-editor-wrap, .split-resizer, .revision-popover, .context-menu, .drop-overlay { display: none !important; }
   .app-shell, .workspace, .editor-area, .editor-content, .document-viewport { display: block; height: auto; overflow: visible; background: white; padding: 0; }
   .paper-page { margin: 0; box-shadow: none; break-after: page; }
   .paper-page:last-child { break-after: auto; }

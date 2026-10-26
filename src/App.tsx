@@ -15,6 +15,7 @@ import {
   Printer,
   ScrollText,
   Settings2,
+  Upload,
   X,
 } from 'lucide-react'
 import MarkdownDocument from './components/MarkdownDocument'
@@ -87,7 +88,7 @@ import {
   supportsDirectoryPicker,
   writeLocalFile,
 } from './lib/localfs'
-import type { LocalFileEntry } from './lib/localfs'
+import { MARKDOWN_EXTENSION as OPENABLE_EXTENSION, type LocalFileEntry } from './lib/localfs'
 import { PluginRegistry } from './plugins/registry'
 import { focusModePlugin } from './plugins/registry'
 import { useI18n } from './i18n'
@@ -119,6 +120,7 @@ export default function App() {
   const [toolbarLeft, setToolbarLeft] = useState(0)
   const [splitRatio, setSplitRatio] = useState(settings.splitRatio)
   const [folder, setFolder] = useState<{ name: string; files: LocalFileEntry[]; writable: boolean } | null>(null)
+  const [dropActive, setDropActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const floatingToolbarRef = useRef<HTMLDivElement>(null)
   const splitDragRef = useRef<{ x: number; ratio: number; width: number } | null>(null)
@@ -126,6 +128,8 @@ export default function App() {
   /** 磁盘上该文件当前的内容：内容一致就不再写盘，避免每次渲染都触发写入。 */
   const localContentRef = useRef(new Map<string, string>())
   const localTimerRef = useRef(new Map<string, number>())
+  /** dragenter / dragleave 会在子元素之间反复触发，用计数抵消掉闪烁。 */
+  const dragDepthRef = useRef(0)
 
   const openDocuments = documents.filter((document) => document.open)
   const activeDocument = documents.find((document) => document.id === activeId && document.open) ?? openDocuments[0]
@@ -574,17 +578,65 @@ export default function App() {
     notify(t('toast.markdownExported'))
   }
 
-  async function importFiles(files: FileList | null) {
-    if (!files?.length) return
-    const imported = await Promise.all(Array.from(files).map(async (file) => createDocument(
+  /** 「导入」与拖拽共用：只收 Markdown / 纯文本，其余文件给一句提示而不是静默吞掉。 */
+  const importFiles = useCallback(async (files: FileList | File[] | null) => {
+    const list = Array.from(files ?? [])
+    if (!list.length) return
+    const markdownFiles = list.filter((file) => OPENABLE_EXTENSION.test(file.name))
+    if (!markdownFiles.length) {
+      notify(t('toast.unsupportedFiles'))
+      return
+    }
+    const imported = await Promise.all(markdownFiles.map(async (file) => createDocument(
       await file.text(),
-      file.name.replace(/\.(md|markdown|txt)$/i, ''),
+      file.name.replace(OPENABLE_EXTENSION, ''),
     )))
     setDocuments((current) => [...current, ...imported])
     setActiveId(imported[imported.length - 1].id)
+    setSelection(null)
+    setSelectionMenu(null)
     notify(t('toast.imported', { count: imported.length }))
     if (fileInputRef.current) fileInputRef.current.value = ''
-  }
+  }, [notify, t])
+
+  // 整窗口拖放：把 .md 从资源管理器拽进来就打开，不用先点「导入」再选文件。
+  useEffect(() => {
+    const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files')
+    const handleDragEnter = (event: DragEvent) => {
+      if (!carriesFiles(event)) return
+      event.preventDefault()
+      dragDepthRef.current += 1
+      setDropActive(true)
+    }
+    const handleDragOver = (event: DragEvent) => {
+      if (!carriesFiles(event)) return
+      // 不 preventDefault 的话浏览器会直接把文件当页面打开，离开当前文档。
+      event.preventDefault()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+    }
+    const handleDragLeave = (event: DragEvent) => {
+      if (!carriesFiles(event)) return
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+      if (dragDepthRef.current === 0) setDropActive(false)
+    }
+    const handleDrop = (event: DragEvent) => {
+      if (!carriesFiles(event)) return
+      event.preventDefault()
+      dragDepthRef.current = 0
+      setDropActive(false)
+      void importFiles(event.dataTransfer?.files ?? null)
+    }
+    window.addEventListener('dragenter', handleDragEnter)
+    window.addEventListener('dragover', handleDragOver)
+    window.addEventListener('dragleave', handleDragLeave)
+    window.addEventListener('drop', handleDrop)
+    return () => {
+      window.removeEventListener('dragenter', handleDragEnter)
+      window.removeEventListener('dragover', handleDragOver)
+      window.removeEventListener('dragleave', handleDragLeave)
+      window.removeEventListener('drop', handleDrop)
+    }
+  }, [importFiles])
 
   /** 选一个本地文件夹：内容直接来自磁盘，改动写回原文件。 */
   async function connectFolder() {
@@ -759,7 +811,7 @@ export default function App() {
           </span>
         </div>
         <div className="header-actions">
-          <input ref={fileInputRef} type="file" accept=".md,.markdown,.txt" multiple hidden onChange={(event) => importFiles(event.target.files)} />
+          <input ref={fileInputRef} type="file" accept=".md,.markdown,.mdown,.mkd,.txt" multiple hidden onChange={(event) => importFiles(event.target.files)} />
           <button className="header-button" onClick={() => fileInputRef.current?.click()}><Import size={16} /><span>{t('header.import')}</span></button>
           <ExportMenu onDirect={handleExport} onClean={handleExportClean} onCustom={() => setModal('export')} />
           <button className="icon-button" title={t('header.print')} onClick={() => window.print()}><Printer size={18} /></button>
@@ -975,6 +1027,15 @@ export default function App() {
           onResolve={resolveOneRevision}
           onClose={() => setRevisionPopover(null)}
         />
+      )}
+      {dropActive && (
+        <div className="drop-overlay">
+          <div className="drop-card">
+            <Upload size={26} />
+            <strong>{t('drop.title')}</strong>
+            <span>{t('drop.hint')}</span>
+          </div>
+        </div>
       )}
       {toast && <div className="toast"><Check size={15} />{toast}</div>}
     </div>

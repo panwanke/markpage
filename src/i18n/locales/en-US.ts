@@ -312,6 +312,9 @@ export const enUS: Messages = {
 
   'toast.formatApplied': 'Annotation written back to the Markdown',
   'toast.formatNoChange': 'Nothing to remove here',
+  'drop.title': 'Drop to open',
+  'drop.hint': 'Markdown and plain text (.md / .markdown / .txt), several at once is fine',
+  'toast.unsupportedFiles': 'Only Markdown and plain-text files can be opened',
   'toast.copied': 'Selected text copied',
   'toast.copyFailed': 'Copy failed, please select and copy manually',
   'toast.revisionMarked': 'Marked as deleted',

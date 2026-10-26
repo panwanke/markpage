@@ -305,6 +305,9 @@ export const zhCN = {
 
   'toast.formatApplied': '标注已写回 Markdown',
   'toast.formatNoChange': '这里没有可取消的格式',
+  'drop.title': '松开即可打开',
+  'drop.hint': '支持 .md / .markdown / .txt，可以一次拖入多个文件',
+  'toast.unsupportedFiles': '只能打开 Markdown 或纯文本文件',
   'toast.copied': '已复制选中文字',
   'toast.copyFailed': '复制失败，请手动选择复制',
   'toast.revisionMarked': '已标记为删除',
