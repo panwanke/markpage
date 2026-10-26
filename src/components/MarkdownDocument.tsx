@@ -2,6 +2,7 @@ import { createElement, useLayoutEffect, useMemo, useRef, useState } from 'react
 import type { CSSProperties, ReactNode } from 'react'
 import type { RootContent } from 'hast'
 import { toString } from 'hast-util-to-string'
+import { useI18n } from '../i18n'
 import { getRootBlocks, parseMarkdown } from '../lib/markdown'
 import type { PageConfig, SelectionSnapshot } from '../types'
 
@@ -152,6 +153,7 @@ export default function MarkdownDocument({
   onCommentOpen,
   onPageCount,
 }: MarkdownDocumentProps) {
+  const { t } = useI18n()
   const tree = useMemo(() => parseMarkdown(markdown), [markdown])
   const blocks = useMemo(() => getRootBlocks(tree).filter((node) => !isCommentCallout(node)), [tree])
   const [pages, setPages] = useState<RootContent[][]>([blocks])
@@ -283,7 +285,7 @@ export default function MarkdownDocument({
           </article>
           <footer className="page-running-footer">
             <span>{config.footer}</span>
-            <span>连续阅读</span>
+            <span>{t('doc.continuous')}</span>
           </footer>
         </section>
       )}

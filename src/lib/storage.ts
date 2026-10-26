@@ -1,24 +1,29 @@
 import { EMPTY_MARKDOWN, SAMPLE_MARKDOWN } from '../data/sample'
+import { detectLocale } from '../i18n/detect'
+import { normalizeLocale, t } from '../i18n'
 import { CUSTOM_EXPORT_DEFAULT } from './export'
 import { clampUiScale } from './fonts'
+import { createDefaultLayout, normalizeLayout } from './layout'
 import type { MarkdownDocument, WorkspaceSettings } from '../types'
 
 const DOCUMENTS_KEY = 'markpage.documents.v1'
 const SETTINGS_KEY = 'markpage.settings.v1'
 
 export const DEFAULT_SETTINGS: WorkspaceSettings = {
-  userName: '晚坷',
+  // 留空即匿名：评论署名与头像都回落到当前语言的「匿名用户」，不预设任何人的名字。
+  userName: '',
+  locale: detectLocale(),
+  layout: createDefaultLayout(),
   viewMode: 'paged',
   editorMode: 'rendered',
   showComments: true,
-  showOutline: true,
   uiFont: 'system',
   uiScale: 1.15,
   docFont: 'serif',
   exportConfig: CUSTOM_EXPORT_DEFAULT,
 }
 
-export function createDocument(markdown = EMPTY_MARKDOWN, name = '未命名文档'): MarkdownDocument {
+export function createDocument(markdown = EMPTY_MARKDOWN, name = t('document.untitled')): MarkdownDocument {
   const now = new Date().toISOString()
   return {
     id: `doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -49,9 +54,18 @@ export function saveDocuments(documents: MarkdownDocument[]) {
 
 export function loadSettings(): WorkspaceSettings {
   try {
-    const saved = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') } as WorkspaceSettings
+    const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Record<string, unknown>
+    const merged = { ...DEFAULT_SETTINGS, ...raw } as WorkspaceSettings
+    const layout = normalizeLayout(raw.layout)
+    // 旧版本只有 showOutline 开关、没有停靠布局：沿用它决定侧栏一开始是否可见。
+    if (raw.layout === undefined && raw.showOutline === false) layout.visible = false
     // 老版本存下来的设置没有外观字段，这里兜一次底，避免界面字号变成 0。
-    return { ...saved, uiScale: clampUiScale(saved.uiScale) }
+    return {
+      ...merged,
+      locale: normalizeLocale(merged.locale),
+      layout,
+      uiScale: clampUiScale(merged.uiScale),
+    }
   } catch {
     return DEFAULT_SETTINGS
   }

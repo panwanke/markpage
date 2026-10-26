@@ -4,10 +4,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Code2,
-  FilePlus2,
   FileText,
   Import,
-  List,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -25,6 +23,11 @@ import CommentDialog from './components/CommentDialog'
 import GitHubStar from './components/GitHubStar'
 import ExportMenu from './components/ExportMenu'
 import ExportDialog from './components/ExportDialog'
+import DockSidebar from './components/DockSidebar'
+import type { PanelDescriptor } from './components/DockSidebar'
+import ExamplesPanel from './components/panels/ExamplesPanel'
+import WorkspacePanel from './components/panels/WorkspacePanel'
+import OutlinePanel from './components/panels/OutlinePanel'
 import {
   addComment,
   applyInlineFormat,
@@ -36,6 +39,7 @@ import {
   parseMarkdown,
   replyToComment,
   toggleCommentResolved,
+  UNTITLED_TITLE,
   updatePageConfig,
 } from './lib/markdown'
 import { buildExport, CLEAN_EXPORT } from './lib/export'
@@ -49,12 +53,18 @@ import {
   saveDocuments,
   saveSettings,
 } from './lib/storage'
+import { createDefaultLayout, toggleSidebar } from './lib/layout'
 import { PluginRegistry } from './plugins/registry'
 import { focusModePlugin } from './plugins/registry'
+import { setLocale, useI18n } from './i18n'
 import type { InlineFormat, PageConfig, SelectionSnapshot } from './types'
 import './App.css'
 
+// 语言要在首帧之前定下来：先按设置里存的语言渲染，避免中文界面闪一下再切英文。
+setLocale(loadSettings().locale)
+
 export default function App() {
+  const { t, setLocale: changeLocale } = useI18n()
   const [documents, setDocuments] = useState(loadDocuments)
   const [settings, setSettings] = useState(loadSettings)
   const [activeId, setActiveId] = useState('')
@@ -73,11 +83,17 @@ export default function App() {
   const openDocuments = documents.filter((document) => document.open)
   const activeDocument = documents.find((document) => document.id === activeId && document.open) ?? openDocuments[0]
   const markdown = activeDocument?.markdown ?? ''
-  const config = useMemo(() => getPageConfig(markdown), [markdown])
+  const rawConfig = useMemo(() => getPageConfig(markdown), [markdown])
+  // Frontmatter 缺 title 时用语言相关的占位标题，不把「未命名文档」写进英文界面。
+  const config = useMemo(
+    () => (rawConfig.title === UNTITLED_TITLE ? { ...rawConfig, title: t('document.untitled') } : rawConfig),
+    [rawConfig, t],
+  )
   const tree = useMemo(() => parseMarkdown(markdown), [markdown])
   const outline = useMemo(() => getOutline(tree), [tree])
-  const threads = useMemo(() => getCommentThreads(markdown), [markdown])
+  const threads = useMemo(() => getCommentThreads(markdown, t('comments.missingAnchor')), [markdown, t])
   const stats = useMemo(() => getMarkdownStats(markdown), [markdown])
+  const layout = settings.layout
 
   useEffect(() => {
     if (activeDocument && activeId !== activeDocument.id) setActiveId(activeDocument.id)
@@ -96,7 +112,14 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [documents])
 
-  useEffect(() => saveSettings(settings), [settings])
+  useEffect(() => {
+    changeLocale(settings.locale)
+    saveSettings(settings)
+  }, [settings, changeLocale])
+
+  useEffect(() => {
+    document.title = activeDocument ? `${activeDocument.name} · ${t('brand.name')}` : t('brand.name')
+  }, [activeDocument, t])
 
   // 外观设置落到 CSS 变量上：界面字体 / 界面字号缩放 / 正文字体。
   useEffect(() => {
@@ -174,8 +197,8 @@ export default function App() {
     updateActiveDocument(applyInlineFormat(markdown, selection, format, option))
     window.getSelection()?.removeAllRanges()
     setSelection(null)
-    notify('标注已写回 Markdown')
-  }, [selection, activeDocument, markdown, updateActiveDocument, notify])
+    notify(t('toast.formatApplied'))
+  }, [selection, activeDocument, markdown, updateActiveDocument, notify, t])
 
   // 三档导出共用同一个入口：直接导出 / 纯净导出 / 自定义导出。
   const handleExport = useCallback(() => {
@@ -186,17 +209,17 @@ export default function App() {
     if (!activeDocument) return
     downloadMarkdown(activeDocument, {
       markdown: buildExport(markdown, CLEAN_EXPORT),
-      fileName: `${activeDocument.name}-纯净版`,
+      fileName: `${activeDocument.name}${t('export.cleanSuffix')}`,
     })
-    notify('已导出纯净 Markdown')
-  }, [activeDocument, markdown, notify])
+    notify(t('toast.cleanExported'))
+  }, [activeDocument, markdown, notify, t])
 
   const handleExportCustom = useCallback((fileName: string, content: string) => {
     if (!activeDocument) return
     downloadMarkdown(activeDocument, { markdown: content, fileName })
     setModal(null)
-    notify('已导出自定义 Markdown')
-  }, [activeDocument, notify])
+    notify(t('toast.customExported'))
+  }, [activeDocument, notify, t])
 
   useEffect(() => {
     const handleKeyboard = (event: KeyboardEvent) => {
@@ -204,7 +227,7 @@ export default function App() {
       if (event.key.toLowerCase() === 's') {
         event.preventDefault()
         handleExport()
-        notify('Markdown 已导出')
+        notify(t('toast.markdownExported'))
       }
       if (event.key.toLowerCase() === 'b' && selection) {
         event.preventDefault()
@@ -213,7 +236,7 @@ export default function App() {
     }
     window.addEventListener('keydown', handleKeyboard)
     return () => window.removeEventListener('keydown', handleKeyboard)
-  }, [selection, handleFormat, handleExport, notify])
+  }, [selection, handleFormat, handleExport, notify, t])
 
   function updateSettings(patch: Partial<typeof settings>) {
     setSettings((current) => ({ ...current, ...patch }))
@@ -240,7 +263,7 @@ export default function App() {
     setDocuments((current) => [...current, document])
     setActiveId(document.id)
     setSelection(null)
-    notify(`已载入示例：${example.name}`)
+    notify(t('toast.exampleLoaded', { name: example.name }))
   }
 
   function openDocument(id: string) {
@@ -269,7 +292,7 @@ export default function App() {
     )))
     setDocuments((current) => [...current, ...imported])
     setActiveId(imported[imported.length - 1].id)
-    notify(`已导入 ${imported.length} 份文档`)
+    notify(t('toast.imported', { count: imported.length }))
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -283,15 +306,16 @@ export default function App() {
 
   function submitComment(content: string) {
     if (!selection) return
-    const next = addComment(markdown, selection, settings.userName, content)
-    const newThread = getCommentThreads(next).find((thread) => !threads.some((item) => item.id === thread.id))
+    const author = settings.userName || t('comments.anonymous')
+    const next = addComment(markdown, selection, author, content)
+    const newThread = getCommentThreads(next, t('comments.missingAnchor')).find((thread) => !threads.some((item) => item.id === thread.id))
     updateActiveDocument(next)
     setActiveCommentId(newThread?.id ?? null)
     updateSettings({ showComments: true })
     setModal(null)
     setSelection(null)
     window.getSelection()?.removeAllRanges()
-    notify('评论已保存到 Markdown')
+    notify(t('toast.commentSaved'))
   }
 
   function goToPage(page: number) {
@@ -300,35 +324,64 @@ export default function App() {
     document.getElementById(`doc-page-${next}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  const panels: PanelDescriptor[] = [
+    {
+      id: 'examples',
+      title: t('sidebar.examples'),
+      badge: EXAMPLE_DOCUMENTS.length,
+      content: <ExamplesPanel examples={EXAMPLE_DOCUMENTS} activeName={activeDocument?.name ?? ''} onOpen={openExample} />,
+    },
+    {
+      id: 'workspace',
+      title: t('sidebar.workspace'),
+      badge: documents.length,
+      content: <WorkspacePanel documents={documents} activeId={activeDocument?.id ?? ''} onOpen={openDocument} onNew={newDocument} />,
+    },
+    {
+      id: 'outline',
+      title: t('sidebar.outline'),
+      badge: outline.length,
+      content: (
+        <OutlinePanel
+          outline={outline}
+          onSelect={(id) => {
+            updateSettings({ editorMode: 'rendered' })
+            window.setTimeout(() => document.querySelector(`.paper-page #${CSS.escape(id)}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30)
+          }}
+        />
+      ),
+    },
+  ]
+
   if (!activeDocument) return null
 
   return (
     <div className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
       <header className="app-header">
-        <button className="brand" onClick={() => setFocusMode(false)} title="墨页 MarkPage">
-          <span className="brand-mark">墨</span>
-          <span><strong>墨页</strong><small>MARKPAGE</small></span>
+        <button className="brand" onClick={() => setFocusMode(false)} title={t('brand.title')}>
+          <span className="brand-mark">{t('brand.name').slice(0, 1)}</span>
+          <span><strong>{t('brand.name')}</strong><small>{t('brand.latin')}</small></span>
         </button>
         <div className="document-identity">
           <input
             value={activeDocument.name}
-            aria-label="文档标题"
+            aria-label={t('document.titleLabel')}
             onChange={(event) => updateActiveDocument(updatePageConfig(markdown, { title: event.target.value }), event.target.value)}
           />
           <span className={`save-state ${saveState}`}>
             {saveState === 'saved' ? <Check size={12} /> : <span className="saving-dot" />}
-            {saveState === 'saved' ? '已保存到本地' : saveState === 'saving' ? '正在保存' : '本地存储空间不足'}
+            {saveState === 'saved' ? t('save.saved') : saveState === 'saving' ? t('save.saving') : t('save.error')}
           </span>
         </div>
         <div className="header-actions">
           <input ref={fileInputRef} type="file" accept=".md,.markdown,.txt" multiple hidden onChange={(event) => importFiles(event.target.files)} />
-          <button className="header-button" onClick={() => fileInputRef.current?.click()}><Import size={16} /><span>导入</span></button>
+          <button className="header-button" onClick={() => fileInputRef.current?.click()}><Import size={16} /><span>{t('header.import')}</span></button>
           <ExportMenu onDirect={handleExport} onClean={handleExportClean} onCustom={() => setModal('export')} />
-          <button className="icon-button" title="打印 / 导出 PDF" onClick={() => window.print()}><Printer size={18} /></button>
+          <button className="icon-button" title={t('header.print')} onClick={() => window.print()}><Printer size={18} /></button>
           <span className="header-divider" />
           <GitHubStar />
-          <button className="icon-button" title="设置" onClick={() => setModal('settings')}><Settings2 size={19} /></button>
-          <button className="user-avatar" title={`${settings.userName} · 本地用户`} onClick={() => setModal('settings')}>{(settings.userName || '匿').slice(0, 1)}</button>
+          <button className="icon-button" title={t('header.settings')} onClick={() => setModal('settings')}><Settings2 size={19} /></button>
+          <button className="user-avatar" title={t('header.user', { name: settings.userName || t('comments.anonymous') })} onClick={() => setModal('settings')}>{(settings.userName || t('header.userFallback')).slice(0, 1)}</button>
         </div>
       </header>
 
@@ -337,73 +390,47 @@ export default function App() {
           {openDocuments.map((document) => (
             <div className={`document-tab ${document.id === activeDocument.id ? 'active' : ''}`} key={document.id}>
               <button className="tab-main" onClick={() => openDocument(document.id)}><FileText size={14} /><span>{document.name}</span></button>
-              <button className="tab-close" title="关闭标签（文档仍保留在左侧）" onClick={() => closeDocument(document.id)}><X size={13} /></button>
+              <button className="tab-close" title={t('tabs.close')} onClick={() => closeDocument(document.id)}><X size={13} /></button>
             </div>
           ))}
-          <button className="new-tab" title="新建文档" onClick={newDocument}><Plus size={17} /></button>
+          <button className="new-tab" title={t('tabs.new')} onClick={newDocument}><Plus size={17} /></button>
         </div>
-        <button className="focus-toggle" onClick={() => setFocusMode((value) => !value)}>{focusMode ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}{focusMode ? '退出专注' : '专注模式'}</button>
+        <button className="focus-toggle" onClick={() => setFocusMode((value) => !value)}>{focusMode ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}{focusMode ? t('tabs.focusOff') : t('tabs.focusOn')}</button>
       </div>
 
       <div className="workspace">
-        {settings.showOutline && !focusMode && <aside className="left-sidebar">
-          <section className="library-section example-library">
-            <div className="sidebar-heading"><span>示例库</span><span className="outline-count">{EXAMPLE_DOCUMENTS.length}</span></div>
-            <div className="example-list">
-              {EXAMPLE_DOCUMENTS.map((example) => (
-                <button
-                  className={`example-item ${activeDocument.name === example.name ? 'active' : ''}`}
-                  key={example.id}
-                  title={`载入示例：${example.name}`}
-                  onClick={() => openExample(example)}
-                >
-                  <span className="example-kind">{example.kind}</span>
-                  <strong>{example.name}</strong>
-                  <small>点击载入为可编辑文档</small>
-                </button>
-              ))}
-            </div>
-          </section>
-          <section className="library-section">
-            <div className="sidebar-heading"><span>工作区</span><button className="icon-button" title="新建文档" onClick={newDocument}><FilePlus2 size={16} /></button></div>
-            <div className="document-list">
-              {documents.map((document) => (
-                <button className={`document-list-item ${document.id === activeDocument.id ? 'active' : ''}`} key={document.id} onClick={() => openDocument(document.id)}>
-                  <FileText size={15} /><span><strong>{document.name}</strong><small>{document.open ? '已打开' : '已关闭'} · {new Date(document.updatedAt).toLocaleDateString('zh-CN')}</small></span>
-                </button>
-              ))}
-            </div>
-          </section>
-          <section className="outline-section">
-            <div className="sidebar-heading"><span>文档大纲</span><span className="outline-count">{outline.length}</span></div>
-            <nav className="outline-tree">
-              {outline.map((item, index) => (
-                <button key={`${item.id}-${index}`} className={`outline-item depth-${item.depth}`} onClick={() => {
-                  updateSettings({ editorMode: 'rendered' })
-                  window.setTimeout(() => document.querySelector(`.paper-page #${CSS.escape(item.id)}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30)
-                }}><span>{item.title}</span></button>
-              ))}
-            </nav>
-          </section>
-          <div className="local-workspace"><span className="workspace-indicator" /><div><strong>本地工作区</strong><small>所有更改均已保存在此设备</small></div></div>
-        </aside>}
+        {layout.visible && !focusMode && (
+          <DockSidebar
+            layout={layout}
+            panels={panels}
+            onChange={(next) => updateSettings({ layout: next })}
+            footer={(
+              <div className="local-workspace">
+                <span className="workspace-indicator" />
+                <div><strong>{t('sidebar.local')}</strong><small>{t('sidebar.localHint')}</small></div>
+              </div>
+            )}
+          />
+        )}
 
         <main className="editor-area">
           <div className="editor-toolbar">
             <div className="mode-switch">
-              <button className={settings.editorMode === 'rendered' ? 'active' : ''} onClick={() => updateSettings({ editorMode: 'rendered' })}><ScrollText size={15} />排版</button>
-              <button className={settings.editorMode === 'source' ? 'active' : ''} onClick={() => { updateSettings({ editorMode: 'source' }); setSelection(null) }}><Code2 size={15} />源码</button>
+              <button className={settings.editorMode === 'rendered' ? 'active' : ''} onClick={() => updateSettings({ editorMode: 'rendered' })}><ScrollText size={15} />{t('editor.rendered')}</button>
+              <button className={settings.editorMode === 'source' ? 'active' : ''} onClick={() => { updateSettings({ editorMode: 'source' }); setSelection(null) }}><Code2 size={15} />{t('editor.source')}</button>
             </div>
             <div className="main-format-tools">
               <FormattingToolbar disabled={!selection || settings.editorMode === 'source'} onFormat={handleFormat} onComment={() => selection && setModal('comment')} />
             </div>
             <div className="view-actions">
-              <div className="view-switch" title="阅读版式">
-                <button className={settings.viewMode === 'paged' ? 'active' : ''} title="分页视图" onClick={() => updateSettings({ viewMode: 'paged' })}><FileText size={16} /></button>
-                <button className={settings.viewMode === 'continuous' ? 'active' : ''} title="连续视图" onClick={() => updateSettings({ viewMode: 'continuous' })}><ScrollText size={16} /></button>
+              <div className="view-switch" title={t('editor.paged')}>
+                <button className={settings.viewMode === 'paged' ? 'active' : ''} title={t('editor.paged')} onClick={() => updateSettings({ viewMode: 'paged' })}><FileText size={16} /></button>
+                <button className={settings.viewMode === 'continuous' ? 'active' : ''} title={t('editor.continuous')} onClick={() => updateSettings({ viewMode: 'continuous' })}><ScrollText size={16} /></button>
               </div>
-              <button className={`icon-button ${settings.showOutline ? 'is-on' : ''}`} title="切换大纲" onClick={() => updateSettings({ showOutline: !settings.showOutline })}><List size={18} /></button>
-              <button className={`icon-button ${settings.showComments ? 'is-on' : ''}`} title="切换评论" onClick={() => updateSettings({ showComments: !settings.showComments })}><MessageSquare size={18} /><span className="toolbar-dot" /></button>
+              <button className={`icon-button ${layout.visible ? 'is-on' : ''}`} title={t('editor.toggleSidebar')} onClick={() => updateSettings({ layout: toggleSidebar(layout) })}>
+                {layout.visible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+              </button>
+              <button className={`icon-button ${settings.showComments ? 'is-on' : ''}`} title={t('editor.toggleComments')} onClick={() => updateSettings({ showComments: !settings.showComments })}><MessageSquare size={18} /><span className="toolbar-dot" /></button>
             </div>
           </div>
 
@@ -420,12 +447,12 @@ export default function App() {
               />
             ) : (
               <div className="source-editor-wrap">
-                <div className="source-editor-meta"><span>MARKDOWN</span><span>UTF-8 · 自动保存</span></div>
+                <div className="source-editor-meta"><span>MARKDOWN</span><span>{t('editor.sourceMeta')}</span></div>
                 <textarea
                   className="source-editor"
                   value={markdown}
                   spellCheck={false}
-                  aria-label="Markdown 源码"
+                  aria-label={t('editor.sourceLabel')}
                   onChange={(event) => updateActiveDocument(event.target.value)}
                 />
               </div>
@@ -433,9 +460,21 @@ export default function App() {
           </div>
 
           <footer className="status-bar">
-            <div><span className="status-save-dot" /><span>{saveState === 'saved' ? '所有更改已保存' : '正在同步更改'}</span><span className="status-divider">/</span><span>{stats.words.toLocaleString()} 字</span><span>约 {stats.readingMinutes} 分钟</span></div>
-            {settings.viewMode === 'paged' && settings.editorMode === 'rendered' && <div className="page-navigator"><button disabled={activePage <= 1} onClick={() => goToPage(activePage - 1)}><ChevronLeft size={14} /></button><span>{activePage} / {pageCount} 页</span><button disabled={activePage >= pageCount} onClick={() => goToPage(activePage + 1)}><ChevronRight size={14} /></button></div>}
-            <div><span>{stats.characters.toLocaleString()} 字符</span><span className="status-divider">/</span><span>Markdown</span></div>
+            <div>
+              <span className="status-save-dot" />
+              <span>{saveState === 'saved' ? t('status.saved') : t('status.syncing')}</span>
+              <span className="status-divider">/</span>
+              <span>{t('status.words', { count: stats.words.toLocaleString() })}</span>
+              <span>{t('status.reading', { count: stats.readingMinutes })}</span>
+            </div>
+            {settings.viewMode === 'paged' && settings.editorMode === 'rendered' && (
+              <div className="page-navigator">
+                <button disabled={activePage <= 1} onClick={() => goToPage(activePage - 1)}><ChevronLeft size={14} /></button>
+                <span>{t('status.page', { page: activePage, total: pageCount })}</span>
+                <button disabled={activePage >= pageCount} onClick={() => goToPage(activePage + 1)}><ChevronRight size={14} /></button>
+              </div>
+            )}
+            <div><span>{t('status.chars', { count: stats.characters.toLocaleString() })}</span><span className="status-divider">/</span><span>{t('status.markdown')}</span></div>
           </footer>
         </main>
 
@@ -445,9 +484,12 @@ export default function App() {
           userName={settings.userName}
           onClose={() => updateSettings({ showComments: false })}
           onLocate={locateComment}
-          onReply={(id, content) => { updateActiveDocument(replyToComment(markdown, id, settings.userName, content)); notify('回复已追加到评论 Callout') }}
+          onReply={(id, content) => {
+            updateActiveDocument(replyToComment(markdown, id, settings.userName || t('comments.anonymous'), content))
+            notify(t('toast.replyAdded'))
+          }}
           onResolve={(id) => updateActiveDocument(toggleCommentResolved(markdown, id))}
-          onDelete={(id) => { updateActiveDocument(deleteComment(markdown, id)); setActiveCommentId(null); notify('评论已删除，原文保持不变') }}
+          onDelete={(id) => { updateActiveDocument(deleteComment(markdown, id)); setActiveCommentId(null); notify(t('toast.commentDeleted')) }}
         />}
       </div>
 
@@ -460,12 +502,15 @@ export default function App() {
       {modal === 'settings' && <SettingsModal
         config={config}
         userName={settings.userName}
+        locale={settings.locale}
         uiFont={settings.uiFont}
         uiScale={settings.uiScale}
         docFont={settings.docFont}
         onUserName={(userName) => updateSettings({ userName })}
+        onLocale={(locale) => updateSettings({ locale })}
         onAppearance={(patch) => updateSettings(patch)}
         onConfig={updateConfig}
+        onResetLayout={() => { updateSettings({ layout: createDefaultLayout() }); notify(t('toast.layoutReset')) }}
         onClose={() => setModal(null)}
       />}
       {modal === 'export' && <ExportDialog

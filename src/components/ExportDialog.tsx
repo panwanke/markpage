@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Check, Copy, Download, RotateCcw, SlidersHorizontal, X } from 'lucide-react'
+import { useI18n } from '../i18n'
+import type { MessageKey } from '../i18n'
 import { buildExport, collectHighlightColors, collectTextColors, CUSTOM_EXPORT_DEFAULT, isDirectExport } from '../lib/export'
 import { useEscape } from '../lib/useEscape'
 import type { ExportColorMapping, ExportConfig, ExportElementRule } from '../types'
@@ -13,10 +15,10 @@ interface ExportDialogProps {
   onClose: () => void
 }
 
-const MODE_LABEL: Record<ExportElementRule['mode'], string> = {
-  keep: '保留标签',
-  retag: '换成自定义标签',
-  strip: '只留文字',
+const MODE_LABEL: Record<ExportElementRule['mode'], MessageKey> = {
+  keep: 'export.modeKeep',
+  retag: 'export.modeRetag',
+  strip: 'export.modeStrip',
 }
 
 function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (value: T) => void }) {
@@ -42,21 +44,22 @@ function RuleSection({
   onChange: (rule: ExportElementRule) => void
   children?: React.ReactNode
 }) {
+  const { t } = useI18n()
   return (
     <section className="export-section">
       <div className="export-section-head"><strong>{label}</strong><span>{hint}</span></div>
       <Segmented
         value={rule.mode}
-        options={(['keep', 'retag', 'strip'] as const).map((mode) => ({ value: mode, label: MODE_LABEL[mode] }))}
+        options={(['keep', 'retag', 'strip'] as const).map((mode) => ({ value: mode, label: t(MODE_LABEL[mode]) }))}
         onChange={(mode) => onChange({ ...rule, mode })}
       />
       {rule.mode !== 'strip' && (
         <div className="export-fields">
           {rule.mode === 'retag' && (
-            <label><span>标签名</span><input value={rule.tag} placeholder="span" onChange={(event) => onChange({ ...rule, tag: event.target.value })} /></label>
+            <label><span>{t('export.tagName')}</span><input value={rule.tag} placeholder="span" onChange={(event) => onChange({ ...rule, tag: event.target.value })} /></label>
           )}
-          <label><span>class</span><input value={rule.className} placeholder="留空则不添加" onChange={(event) => onChange({ ...rule, className: event.target.value })} /></label>
-          <label><span>行内 style</span><input value={rule.style} placeholder="留空则不写 style" onChange={(event) => onChange({ ...rule, style: event.target.value })} /></label>
+          <label><span>{t('export.class')}</span><input value={rule.className} placeholder={t('export.classPlaceholder')} onChange={(event) => onChange({ ...rule, className: event.target.value })} /></label>
+          <label><span>{t('export.inlineStyle')}</span><input value={rule.style} placeholder={t('export.stylePlaceholder')} onChange={(event) => onChange({ ...rule, style: event.target.value })} /></label>
         </div>
       )}
       {children}
@@ -73,10 +76,11 @@ function ColorRows({
   mappings: Record<string, ExportColorMapping>
   onChange: (mappings: Record<string, ExportColorMapping>) => void
 }) {
-  if (!colors.length) return <p className="export-empty">当前文档没有用到这一类颜色。</p>
+  const { t } = useI18n()
+  if (!colors.length) return <p className="export-empty">{t('export.noColors')}</p>
   return (
     <div className="export-colors">
-      <div className="export-colors-head"><span /><span>class</span><span>行内 style</span></div>
+      <div className="export-colors-head"><span /><span>{t('export.class')}</span><span>{t('export.inlineStyle')}</span></div>
       {colors.map((color) => {
         const mapping = mappings[color] ?? { className: '', style: '' }
         const update = (patch: Partial<ExportColorMapping>) => onChange({ ...mappings, [color]: { ...mapping, ...patch } })
@@ -93,7 +97,8 @@ function ColorRows({
 }
 
 export default function ExportDialog({ name, markdown, config, onConfig, onDownload, onClose }: ExportDialogProps) {
-  const [fileName, setFileName] = useState(`${name}-自定义`)
+  const { t } = useI18n()
+  const [fileName, setFileName] = useState(`${name}${t('export.customSuffix')}`)
   const [copied, setCopied] = useState(false)
   const highlightColors = useMemo(() => collectHighlightColors(markdown), [markdown])
   const textColors = useMemo(() => collectTextColors(markdown), [markdown])
@@ -116,53 +121,57 @@ export default function ExportDialog({ name, markdown, config, onConfig, onDownl
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section className="dialog export-dialog" role="dialog" aria-modal="true" aria-label="自定义导出">
+      <section className="dialog export-dialog" role="dialog" aria-modal="true" aria-label={t('export.dialogTitle')}>
         <header className="export-dialog-head">
           <div className="dialog-heading">
             <span className="dialog-icon"><SlidersHorizontal size={18} /></span>
-            <div><h2>自定义导出</h2><p>把墨页的标记映射成你自己的 HTML 约定，右侧实时预览。</p>{isDirectExport(config) && <p className="export-hint">当前映射与「直接导出」等价，产物与源文件逐字节一致。</p>}</div>
+            <div><h2>{t('export.dialogTitle')}</h2><p>{t('export.dialogHint')}</p>{isDirectExport(config) && <p className="export-hint">{t('export.directEquivalent')}</p>}</div>
           </div>
-          <button className="icon-button" title="恢复初始映射" onClick={() => onConfig({ ...CUSTOM_EXPORT_DEFAULT })}><RotateCcw size={17} /></button>
-          <button className="icon-button" title="关闭" onClick={onClose}><X size={19} /></button>
+          <button className="icon-button" title={t('export.resetMapping')} onClick={() => onConfig({ ...CUSTOM_EXPORT_DEFAULT })}><RotateCcw size={17} /></button>
+          <button className="icon-button" title={t('common.close')} onClick={onClose}><X size={19} /></button>
         </header>
 
         <div className="export-dialog-body">
           <div className="export-options">
             <RuleSection
-              label="评论锚点 <comment>"
-              hint="正文里被评论的那一段"
+              label={t('export.commentAnchor')}
+              hint={t('export.commentAnchorHint')}
               rule={config.comment}
               onChange={(rule) => patch({ comment: rule })}
             />
             <section className="export-section">
-              <div className="export-section-head"><strong>评论块 &gt; [!comment]</strong><span>文档末尾的讨论记录</span></div>
+              <div className="export-section-head"><strong>{t('export.commentBlock')}</strong><span>{t('export.commentBlockHint')}</span></div>
               <Segmented
                 value={config.callouts}
-                options={[{ value: 'keep', label: '保留' }, { value: 'remove', label: '删除' }]}
+                options={[{ value: 'keep', label: t('export.keep') }, { value: 'remove', label: t('export.remove') }]}
                 onChange={(value) => patch({ callouts: value })}
               />
             </section>
             <RuleSection
-              label="高亮 <mark>"
-              hint="按底色分别映射"
+              label={t('export.highlight')}
+              hint={t('export.highlightHint')}
               rule={config.highlight}
               onChange={(rule) => patch({ highlight: rule })}
             >
               <ColorRows colors={highlightColors} mappings={config.highlightColors} onChange={(mappings) => patch({ highlightColors: mappings })} />
             </RuleSection>
             <RuleSection
-              label="文字颜色 <span>"
-              hint="按文字色分别映射"
+              label={t('export.textColor')}
+              hint={t('export.textColorHint')}
               rule={config.color}
               onChange={(rule) => patch({ color: rule })}
             >
               <ColorRows colors={textColors} mappings={config.textColors} onChange={(mappings) => patch({ textColors: mappings })} />
             </RuleSection>
             <section className="export-section">
-              <div className="export-section-head"><strong>Frontmatter</strong><span>文件头的 YAML</span></div>
+              <div className="export-section-head"><strong>{t('export.frontmatter')}</strong><span>{t('export.frontmatterHint')}</span></div>
               <Segmented
                 value={config.frontmatter}
-                options={[{ value: 'keep', label: '原样保留' }, { value: 'page', label: '去掉页面设置' }, { value: 'remove', label: '整块删除' }]}
+                options={[
+                  { value: 'keep', label: t('export.frontmatterKeep') },
+                  { value: 'page', label: t('export.frontmatterPage') },
+                  { value: 'remove', label: t('export.frontmatterRemove') },
+                ]}
                 onChange={(value) => patch({ frontmatter: value })}
               />
             </section>
@@ -170,8 +179,8 @@ export default function ExportDialog({ name, markdown, config, onConfig, onDownl
 
           <div className="export-preview">
             <div className="export-preview-head">
-              <span>预览 · {preview.length.toLocaleString()} 字符</span>
-              <button className="preview-copy" onClick={copyPreview}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? '已复制' : '复制'}</button>
+              <span>{t('export.preview', { count: preview.length.toLocaleString() })}</span>
+              <button className="preview-copy" onClick={copyPreview}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? t('export.copied') : t('export.copy')}</button>
             </div>
             <pre>{preview}</pre>
           </div>
@@ -179,13 +188,13 @@ export default function ExportDialog({ name, markdown, config, onConfig, onDownl
 
         <footer className="export-dialog-foot">
           <label className="export-filename">
-            <span>文件名</span>
+            <span>{t('export.fileName')}</span>
             <input value={fileName} onChange={(event) => setFileName(event.target.value)} />
             <span className="export-suffix">.md</span>
           </label>
           <div className="export-foot-actions">
-            <button className="secondary-button" onClick={onClose}>取消</button>
-            <button className="primary-button" onClick={() => onDownload(fileName, preview)}><Download size={14} />下载 .md</button>
+            <button className="secondary-button" onClick={onClose}>{t('common.cancel')}</button>
+            <button className="primary-button" onClick={() => onDownload(fileName, preview)}><Download size={14} />{t('export.download')}</button>
           </div>
         </footer>
       </section>

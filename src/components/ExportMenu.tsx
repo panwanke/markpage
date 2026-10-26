@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Download, Eraser, SlidersHorizontal } from 'lucide-react'
+import { useI18n } from '../i18n'
+import type { MessageKey } from '../i18n'
 
 interface ExportMenuProps {
   disabled?: boolean
@@ -8,28 +10,14 @@ interface ExportMenuProps {
   onCustom: () => void
 }
 
-const ITEMS = [
-  {
-    key: 'direct',
-    icon: Download,
-    title: '直接导出',
-    description: '原样导出 .md，排版设置、标注与全部评论一并带走。',
-  },
-  {
-    key: 'clean',
-    icon: Eraser,
-    title: '纯净导出',
-    description: '去掉 comment 标签、评论块与高亮颜色，只留干净正文。',
-  },
-  {
-    key: 'custom',
-    icon: SlidersHorizontal,
-    title: '自定义导出…',
-    description: '把标签映射成自己的 HTML，可按颜色配 class 或行内样式。',
-  },
-] as const
+const ITEMS: { key: 'direct' | 'clean' | 'custom'; icon: typeof Download; title: MessageKey; description: MessageKey }[] = [
+  { key: 'direct', icon: Download, title: 'export.direct', description: 'export.directHint' },
+  { key: 'clean', icon: Eraser, title: 'export.clean', description: 'export.cleanHint' },
+  { key: 'custom', icon: SlidersHorizontal, title: 'export.custom', description: 'export.customHint' },
+]
 
 export default function ExportMenu({ disabled = false, onDirect, onClean, onCustom }: ExportMenuProps) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -58,11 +46,11 @@ export default function ExportMenu({ disabled = false, onDirect, onClean, onCust
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="导出 Markdown"
+        title={t('export.menuTitle')}
         onClick={() => setOpen((value) => !value)}
       >
         <Download size={16} />
-        <span>导出</span>
+        <span>{t('header.export')}</span>
         <ChevronDown size={13} className="export-caret" />
       </button>
       {open && (
@@ -77,7 +65,7 @@ export default function ExportMenu({ disabled = false, onDirect, onClean, onCust
               }}
             >
               <item.icon size={16} />
-              <span><strong>{item.title}</strong><small>{item.description}</small></span>
+              <span><strong>{t(item.title)}</strong><small>{t(item.description)}</small></span>
             </button>
           ))}
         </div>

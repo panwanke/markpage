@@ -1,3 +1,5 @@
+import type { SidebarLayout } from './lib/layout'
+
 export interface MarkdownDocument {
   id: string
   name: string
@@ -81,10 +83,13 @@ export interface ExportConfig {
 
 export interface WorkspaceSettings {
   userName: string
+  /** 界面语言（LOCALES 的 id）。 */
+  locale: string
+  /** 侧边栏停靠布局：面板分组、宽度与显隐。 */
+  layout: SidebarLayout
   viewMode: 'paged' | 'continuous'
   editorMode: 'rendered' | 'source'
   showComments: boolean
-  showOutline: boolean
   /** 界面字体（UI_FONTS 的 value）。 */
   uiFont: string
   /** 界面字号缩放，1 = 原尺寸。 */

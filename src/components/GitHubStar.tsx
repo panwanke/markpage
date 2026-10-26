@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Star } from 'lucide-react'
+import { useI18n } from '../i18n'
 
 export const REPO_URL = 'https://github.com/panwanke/markpage'
 const CACHE_KEY = 'markpage.github-stars.v1'
@@ -39,6 +40,7 @@ function GitHubMark() {
  * star 数只是装饰，取不到（离线、限流、未建仓）时静默降级，不阻塞任何交互。
  */
 export default function GitHubStar() {
+  const { t } = useI18n()
   const [stars, setStars] = useState<number | null>(readCachedStars)
 
   useEffect(() => {
@@ -69,11 +71,11 @@ export default function GitHubStar() {
       href={REPO_URL}
       target="_blank"
       rel="noreferrer"
-      title="喜欢的话，去 GitHub 给墨页点一个 Star"
-      aria-label="在 GitHub 上给墨页 MarkPage 加 Star"
+      title={t('github.title')}
+      aria-label={t('github.aria')}
     >
       <GitHubMark />
-      <span className="github-star-label">Star</span>
+      <span className="github-star-label">{t('github.label')}</span>
       {stars !== null && <span className="github-star-count"><Star size={11} aria-hidden="true" />{formatStars(stars)}</span>}
     </a>
   )
