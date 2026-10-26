@@ -1,0 +1,28 @@
+@import 'katex/dist/katex.min.css';
+@import 'highlight.js/styles/github.css';
+
+:root {
+  font-family: Inter, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #292b32;
+  background: #f4f4f7;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --accent: #6c5ce7;
+  --accent-dark: #5848cf;
+  --accent-soft: #efedff;
+  --text: #292b32;
+  --muted: #858793;
+  --border: #e8e8ed;
+  --panel: #ffffff;
+  --canvas: #f3f4f6;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; }
+body { overflow: hidden; }
+button, input, textarea, select { font: inherit; }
+button { color: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid rgba(108, 92, 231, .45); outline-offset: 2px; }
+::selection { background: rgba(108, 92, 231, .2); }
