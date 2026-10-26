@@ -42,20 +42,27 @@ npm run lint     # 静态检查
 | 标签上的 `×` / 右上角 `+` | 关闭面板 / 从列表里重新打开 |
 | 拖动侧栏右边缘 | 调整宽度（双击复位 236px，范围 190–520；实际宽度再乘 `--ui-width`） |
 | 面板组右上角按钮或工具栏图标 | 整栏隐藏 / 显示 |
+| 标签聚焦后 `←` `→` / `Home` `End` / `Delete` | 切换标签 / 跳到首尾 / 关闭当前面板 |
+| 侧栏右边缘聚焦后 `←` `→`（`Shift` 加大步长）/ `Home` | 键盘调宽 / 复位默认宽度 |
+| `+` 菜单打开后 `↑` `↓` / `Esc` | 在面板列表里移动 / 关闭菜单 |
 
-布局存在 `markpage.settings.v1` 的 `layout` 字段里，刷新、重开浏览器都保持原样；旧版本只有 `showOutline` 布尔值时会被自动迁移成默认布局。设置 → 通用 里可以一键恢复默认布局。
+布局存在 `markpage.settings.v1` 的 `layout` 字段里，刷新、重开浏览器都保持原样；旧版本只有 `showOutline` 布尔值时会被自动迁移成默认布局。设置 → 通用 里可以一键恢复默认布局。窄于 1020px 时侧栏宽度固定为 200px 且隐藏拖拽把手，窄于 780px 时整栏收起、工具栏的显隐按钮也一并隐藏（否则会出现「按了没反应却改了状态」的假控件）。
 
 ## 多语言
 
-`src/i18n/locales/` 下每个语言一份**扁平键值**词表：`zh-CN.ts` 是唯一真相源，`en-US.ts` 用 `Record<MessageKey, string>` 约束，漏翻一个键就编译不过。文案支持 `{name}` 占位符。
+`src/i18n/locales/` 下每个语言一份**扁平键值**词表：`zh-CN.ts` 是唯一真相源，`en-US.ts` 用 `Record<MessageKey, string>` 约束，漏翻一个键就编译不过。文案支持 `{name}` 占位符；**数字参数按当前语言格式化**（千分位），所以调用方要传原始数字而不是先 `toLocaleString()`。
+
+复数走可选后缀：词表里写 `key.one` / `key.other`（也支持 `zero` / `two` / `few` / `many`），运行时按 `Intl.PluralRules` 选，没有对应变体就落回基础键。中文是单形态语言，只写基础键即可；英文给 `status.words`、`status.page` 这类带计数的文案补了 `.one`。
 
 新增一门语言：
 
-1. 复制 `src/i18n/locales/zh-CN.ts` 为 `xx-XX.ts`，翻译右侧的值；
+1. 复制 `src/i18n/locales/zh-CN.ts` 为 `xx-XX.ts`，翻译右侧的值（需要复数就补 `key.one` 等后缀键）；
 2. 在 `src/i18n/index.ts` 的 `LOCALES` 数组里加一行 `{ id, label, short, htmlLang, messages }`（`label` 用该语言自称）；
-3. 设置 → 语言 里自动出现这个选项，`<html lang>` 与日期格式（`toLocaleDateString`）一并跟着切换。
+3. 设置 → 语言 里自动出现这个选项，`<html lang>`、日期格式（`toLocaleDateString`）与数字格式一并跟着切换。
 
-界面语言在首帧之前就从设置里读出来，不会先闪一下默认语言。翻译只作用于应用外壳：Markdown 正文、评论内容与 Frontmatter 永远原样保留。
+`npm test` 里的 `i18n/index.test.ts` 会守住三件事：每门语言覆盖全部键、同一文案的占位符集合与 zh-CN 一致、复数变体有兜底。
+
+界面语言在首帧之前就从设置里读出来，不会先闪一下默认语言。翻译只作用于应用外壳：Markdown 正文、评论内容与 Frontmatter 永远原样保留。文档名留空即「未命名」，标签页、标题框与页面页眉统一按当前语言现算——翻译结果不会写进数据，所以切换语言时三处始终一致。
 
 ## 示例库
 

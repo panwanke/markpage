@@ -37,14 +37,12 @@ export const zhCN = {
   'sidebar.local': '本地工作区',
   'sidebar.localHint': '所有更改均已保存在此设备',
   'sidebar.hide': '隐藏侧边栏',
-  'sidebar.show': '显示侧边栏',
   'sidebar.panels': '面板',
   'sidebar.addPanel': '添加面板',
   'sidebar.empty': '所有面板已关闭，点击右上角 + 重新打开。',
   'sidebar.resize': '拖动调整宽度，双击复位',
   'sidebar.dragTab': '拖动可与其他面板合并为标签页',
   'sidebar.dropHere': '拖到这里：新建一个面板组',
-  'sidebar.dropGroup': '松开即可合并为标签页',
   'sidebar.moveGroup': '拖动调整面板组顺序',
   'sidebar.closePanel': '关闭面板',
 
@@ -66,7 +64,6 @@ export const zhCN = {
   'status.markdown': 'Markdown',
 
   'doc.continuous': '连续阅读',
-  'doc.pageOf': '{page} / {total}',
 
   'comments.title': '评论',
   'comments.close': '关闭评论',
@@ -247,3 +244,10 @@ export const zhCN = {
 } as const
 
 export type MessageKey = keyof typeof zhCN
+
+/**
+ * 词表类型：`Record<MessageKey, string>` 保证不漏翻（少一个键就编译不过），
+ * 交叉的索引签名允许各语言额外提供复数变体，例如 `status.words.one`。
+ * 中文没有复数形态，只写基础键；英文补 `.one` / `.other`，运行时按 Intl.PluralRules 选。
+ */
+export type Messages = Record<MessageKey, string> & Partial<Record<string, string>>

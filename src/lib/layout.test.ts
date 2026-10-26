@@ -122,4 +122,47 @@ describe('侧边栏停靠布局', () => {
     expect(ids(normalizeLayout(null))).toEqual(['examples', 'workspace', 'outline'])
     expect(ids(normalizeLayout('broken'))).toEqual(['examples', 'workspace', 'outline'])
   })
+
+  it('重复的组 id 会被改写，保证按 id 查找不会永远命中第一个', () => {
+    const layout = normalizeLayout({
+      groups: [
+        { id: 'x', panels: ['examples'], active: 'examples' },
+        { id: 'x', panels: ['workspace'], active: 'workspace' },
+        { id: 'y', panels: ['outline'], active: 'outline' },
+      ],
+    })
+    expect(layout.groups).toHaveLength(3)
+    expect(layout.groups[0].id).toBe('x')
+    expect(layout.groups[1].id).not.toBe('x')
+    expect(new Set(layout.groups.map((group) => group.id)).size).toBe(3)
+    // 重复 id 被改写后，第二组也能被正常寻址，不会被第一组吃掉
+    const moved = movePanel(layout, 'outline', { groupId: layout.groups[1].id })
+    expect(ids(moved)).toEqual(['examples', 'workspace+outline'])
+  })
+
+  it('调整组顺序的边界：原地、下移一位、移到末尾', () => {
+    const base = createDefaultLayout()
+    expect(ids(moveGroup(base, 'group-examples', 0))).toEqual(['examples', 'workspace', 'outline'])
+    expect(ids(moveGroup(base, 'group-examples', 1))).toEqual(['examples', 'workspace', 'outline'])
+    expect(ids(moveGroup(base, 'group-examples', base.groups.length))).toEqual(['workspace', 'outline', 'examples'])
+    expect(ids(moveGroup(base, 'group-outline', 0))).toEqual(['outline', 'examples', 'workspace'])
+    // 越界索引被夹住，不会抛错也不会丢组
+    expect(ids(moveGroup(base, 'group-examples', 99))).toEqual(['workspace', 'outline', 'examples'])
+  })
+
+  it('重开已存在的面板会把隐藏的侧栏一起放出来', () => {
+    const hidden = { ...createDefaultLayout(), visible: false }
+    const reopened = openPanel(hidden, 'workspace')
+    expect(reopened.visible).toBe(true)
+    expect(findPanelGroup(reopened, 'workspace')?.active).toBe('workspace')
+  })
+
+  it('搬面板不会改动传入的布局对象', () => {
+    const base = createDefaultLayout()
+    const snapshot = JSON.stringify(base)
+    movePanel(base, 'outline', { groupId: 'group-workspace' })
+    closePanel(base, 'examples')
+    moveGroup(base, 'group-examples', 2)
+    expect(JSON.stringify(base)).toBe(snapshot)
+  })
 })

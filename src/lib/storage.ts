@@ -1,9 +1,10 @@
 import { EMPTY_MARKDOWN, SAMPLE_MARKDOWN } from '../data/sample'
 import { detectLocale } from '../i18n/detect'
-import { normalizeLocale, t } from '../i18n'
+import { LOCALES, normalizeLocale, t } from '../i18n'
 import { CUSTOM_EXPORT_DEFAULT } from './export'
 import { clampUiScale } from './fonts'
 import { createDefaultLayout, normalizeLayout } from './layout'
+import { getPageConfig, UNTITLED_TITLE } from './markdown'
 import type { MarkdownDocument, WorkspaceSettings } from '../types'
 
 const DOCUMENTS_KEY = 'markpage.documents.v1'
@@ -23,7 +24,20 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   exportConfig: CUSTOM_EXPORT_DEFAULT,
 }
 
-export function createDocument(markdown = EMPTY_MARKDOWN, name = t('document.untitled')): MarkdownDocument {
+/**
+ * 「未命名」是显示层的事，不是数据。
+ * 旧版本把 t('document.untitled') 的结果直接存进了文档名，切语言后会残留成另一种语言的标题，
+ * 所以这里把各语言的「未命名文档」都视为空名，交给界面按当前语言重新渲染。
+ */
+const UNTITLED_NAMES = new Set(LOCALES.map((locale) => locale.messages['document.untitled']))
+
+function normalizeDocumentName(name: unknown) {
+  if (typeof name !== 'string') return ''
+  const trimmed = name.trim()
+  return UNTITLED_NAMES.has(trimmed) ? '' : trimmed
+}
+
+export function createDocument(markdown = EMPTY_MARKDOWN, name = ''): MarkdownDocument {
   const now = new Date().toISOString()
   return {
     id: `doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -40,12 +54,16 @@ export function loadDocuments() {
     const saved = localStorage.getItem(DOCUMENTS_KEY)
     if (saved) {
       const docs = JSON.parse(saved) as MarkdownDocument[]
-      if (Array.isArray(docs) && docs.length) return docs
+      if (Array.isArray(docs) && docs.length) {
+        return docs.map((document) => ({ ...document, name: normalizeDocumentName(document.name) }))
+      }
     }
   } catch {
     // A malformed local cache should never prevent the editor from opening.
   }
-  return [createDocument(SAMPLE_MARKDOWN, '让知识保留上下文')]
+  // 首篇样例的名字直接取自它自己的 Frontmatter，别把标题抄成字面量（改了样例这里会跟着变）。
+  const sampleTitle = getPageConfig(SAMPLE_MARKDOWN).title
+  return [createDocument(SAMPLE_MARKDOWN, sampleTitle === UNTITLED_TITLE ? '' : sampleTitle)]
 }
 
 export function saveDocuments(documents: MarkdownDocument[]) {
@@ -84,7 +102,8 @@ interface DownloadOptions {
 
 export function downloadMarkdown(document: MarkdownDocument, options: DownloadOptions = {}) {
   const content = options.markdown ?? document.markdown
-  const rawName = (options.fileName ?? document.name).replace(/\.md$/i, '')
+  // 空名 = 未命名，落盘时用当前语言的占位标题，而不是硬编码的 'document'。
+  const rawName = (options.fileName ?? document.name ?? '').replace(/\.md$/i, '').trim() || t('document.untitled')
   const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const anchor = window.document.createElement('a')

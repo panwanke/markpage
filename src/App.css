@@ -67,11 +67,14 @@ button:disabled { cursor: default; opacity: .35; }
 .dock-menu-check { width: 14px; display: inline-grid; place-items: center; color: var(--accent); }
 .dock-groups { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 1px; background: #ececf2; overflow: hidden; position: relative; }
 .dock-group { flex: 1 1 0; min-height: 92px; display: flex; flex-direction: column; min-width: 0; background: #fafafd; }
-.dock-group.is-group-target { box-shadow: inset 0 0 0 2px rgba(108,92,231,.4); }
+.dock-group.is-group-target { background: #f6f3ff; }
+/* 拖整组时用顶边线表示「会插到这一组之前」，与标签的 before/after 线是同一套语义。 */
+.dock-group.drop-before-group { box-shadow: inset 0 2px 0 var(--accent); }
 .dock-tabs { height: 30px; flex: 0 0 30px; display: flex; align-items: stretch; border-bottom: 1px solid var(--border); background: #f4f4f8; overflow: hidden; }
 .dock-tabs.is-drop-target { background: #f1eefc; }
 .dock-tab { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 148px; padding: 0 4px 0 9px; color: #8b8c96; font-size: calc(10.5px * var(--ui-scale)); border-right: 1px solid #ececf1; position: relative; cursor: grab; user-select: none; }
 .dock-tab:active { cursor: grabbing; }
+.dock-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .dock-tab.active { background: #fafafd; color: #47454f; font-weight: 600; }
 .dock-tab.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); }
 .dock-tab.is-dragging { opacity: .38; }
@@ -92,6 +95,7 @@ button:disabled { cursor: default; opacity: .35; }
 .dock-drop-tail.is-over { border-color: var(--accent); background: #f1edfd; color: var(--accent); }
 .dock-resizer { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; z-index: 12; }
 .dock-resizer:hover { background: linear-gradient(90deg, transparent 2px, rgba(108,92,231,.4) 2px, rgba(108,92,231,.4) 4px, transparent 4px); }
+.dock-resizer:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .panel-scroll { padding: 7px 9px 12px; }
 .panel-toolbar { display: flex; justify-content: flex-end; padding: 1px 1px 5px; }
 .panel-action { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border-radius: 5px; color: #8a8896; font-size: calc(10px * var(--ui-scale)); }
@@ -420,7 +424,10 @@ button:disabled { cursor: default; opacity: .35; }
   .brand { width: 160px; }
 }
 @media (max-width: 780px) {
+  /* 这个断点下侧栏由 CSS 直接隐藏，工具栏的显隐按钮就成了「按了没反应但会改状态」的假控件，
+     一并收掉：状态只在能看见侧栏的宽度区间里被用户改变。 */
   .dock-sidebar { display: none; }
+  .dock-toggle { display: none; }
   .brand { width: auto; }
   .brand > span:last-child { display: none; }
   .app-header { gap: 12px; padding: 0 12px; }

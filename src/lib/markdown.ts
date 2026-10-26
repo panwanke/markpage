@@ -157,6 +157,8 @@ export function updatePageConfig(markdown: string, patch: Partial<PageConfig>) {
     }
   }
   Object.assign(data, patch)
+  // 空标题 = 未命名：不往 Frontmatter 里写 `title: ''`，让读取端回落到占位标题。
+  if (data.title === '') delete data.title
   const nextFrontmatter = `---\n${stringifyYaml(data).trimEnd()}\n---\n`
   return match ? nextFrontmatter + markdown.slice(match[0].length) : nextFrontmatter + '\n' + markdown
 }

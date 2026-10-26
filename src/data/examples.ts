@@ -1,4 +1,4 @@
-import { getPageConfig } from '../lib/markdown'
+import { getPageConfig, UNTITLED_TITLE } from '../lib/markdown'
 
 export interface ExampleDocument {
   id: string
@@ -13,10 +13,13 @@ const modules = import.meta.glob('/examples/*.md', {
   eager: true,
 }) as Record<string, string>
 
+// 文件名形如 `01-技术设计-插件系统.md`：序号之后第一段是分类，其余是标题。
+// 兜底不写死任何语言的字面量，解析不出来就整段当标题用。
 function labelFromPath(path: string) {
-  const base = path.split('/').pop()?.replace(/\.md$/i, '') ?? '示例'
-  const segments = base.replace(/^\d+[-_]/, '').split('-')
-  return { kind: segments[0] || '示例', name: segments.slice(1).join(' · ') || segments[0] }
+  const base = path.split('/').pop()?.replace(/\.md$/i, '') ?? ''
+  const segments = base.replace(/^\d+[-_]/, '').split('-').filter(Boolean)
+  const [kind = '', ...rest] = segments
+  return { kind, name: rest.join(' · ') || kind || base }
 }
 
 export const EXAMPLE_DOCUMENTS: ExampleDocument[] = Object.entries(modules)
@@ -25,7 +28,7 @@ export const EXAMPLE_DOCUMENTS: ExampleDocument[] = Object.entries(modules)
     const title = getPageConfig(markdown).title
     return {
       id: `example-${path}`,
-      name: title && title !== '未命名文档' ? title : name,
+      name: title && title !== UNTITLED_TITLE ? title : name,
       kind,
       markdown,
     }

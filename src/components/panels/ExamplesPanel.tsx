@@ -19,7 +19,7 @@ export default function ExamplesPanel({ examples, activeName, onOpen }: Examples
           title={t('sidebar.loadExample', { name: example.name })}
           onClick={() => onOpen(example)}
         >
-          <span className="example-kind">{example.kind}</span>
+          {example.kind && <span className="example-kind">{example.kind}</span>}
           <strong><FileText size={11} />{example.name}</strong>
           <small>{t('sidebar.exampleHint')}</small>
         </button>

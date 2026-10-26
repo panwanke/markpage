@@ -179,7 +179,7 @@ export default function ExportDialog({ name, markdown, config, onConfig, onDownl
 
           <div className="export-preview">
             <div className="export-preview-head">
-              <span>{t('export.preview', { count: preview.length.toLocaleString() })}</span>
+              <span>{t('export.preview', { count: preview.length })}</span>
               <button className="preview-copy" onClick={copyPreview}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? t('export.copied') : t('export.copy')}</button>
             </div>
             <pre>{preview}</pre>

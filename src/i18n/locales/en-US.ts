@@ -1,7 +1,11 @@
-import type { MessageKey } from './zh-CN'
+import type { Messages } from './zh-CN'
 
-/** English UI copy. Must cover every key in zh-CN — the type check enforces it. */
-export const enUS: Record<MessageKey, string> = {
+/**
+ * English UI copy. Must cover every key in zh-CN — the type check enforces it.
+ * 复数用 `.one` / `.other` 变体表达（见 i18n/index.ts 的 resolveTemplate），
+ * 中文没有这一层，所以这些后缀键只出现在需要的语言里。
+ */
+export const enUS: Messages = {
   'brand.name': 'MarkPage',
   'brand.latin': 'MARKPAGE',
   'brand.title': 'MarkPage',
@@ -35,14 +39,12 @@ export const enUS: Record<MessageKey, string> = {
   'sidebar.local': 'Local workspace',
   'sidebar.localHint': 'All changes are saved on this device',
   'sidebar.hide': 'Hide sidebar',
-  'sidebar.show': 'Show sidebar',
   'sidebar.panels': 'Panels',
   'sidebar.addPanel': 'Add panel',
   'sidebar.empty': 'All panels are closed. Use + to reopen one.',
   'sidebar.resize': 'Drag to resize, double-click to reset',
   'sidebar.dragTab': 'Drag to merge with another panel group',
   'sidebar.dropHere': 'Drop here to create a new panel group',
-  'sidebar.dropGroup': 'Release to merge into tabs',
   'sidebar.moveGroup': 'Drag to reorder panel groups',
   'sidebar.closePanel': 'Close panel',
 
@@ -58,17 +60,20 @@ export const enUS: Record<MessageKey, string> = {
   'status.saved': 'All changes saved',
   'status.syncing': 'Syncing changes',
   'status.words': '{count} words',
+  'status.words.one': '{count} word',
   'status.reading': '~{count} min',
   'status.page': '{page} / {total} pages',
+  'status.page.one': '{page} / {total} page',
   'status.chars': '{count} characters',
+  'status.chars.one': '{count} character',
   'status.markdown': 'Markdown',
 
   'doc.continuous': 'Continuous',
-  'doc.pageOf': '{page} / {total}',
 
   'comments.title': 'Comments',
   'comments.close': 'Close comments',
   'comments.count': '{count} discussion entries',
+  'comments.count.one': '{count} discussion entry',
   'comments.showResolved': 'Show resolved',
   'comments.emptyTitle': 'Keep discussion next to the text',
   'comments.emptyBody': 'Select some text, then click the comment icon. Comments and replies are written into the Markdown.',
@@ -125,6 +130,7 @@ export const enUS: Record<MessageKey, string> = {
   'export.frontmatterPage': 'Drop page keys',
   'export.frontmatterRemove': 'Remove block',
   'export.preview': 'Preview · {count} characters',
+  'export.preview.one': 'Preview · {count} character',
   'export.copy': 'Copy',
   'export.copied': 'Copied',
   'export.fileName': 'File name',
@@ -234,6 +240,7 @@ export const enUS: Record<MessageKey, string> = {
   'toast.markdownExported': 'Markdown exported',
   'toast.exampleLoaded': 'Example loaded: {name}',
   'toast.imported': 'Imported {count} documents',
+  'toast.imported.one': 'Imported {count} document',
   'toast.commentSaved': 'Comment saved to the Markdown',
   'toast.replyAdded': 'Reply appended to the comment callout',
   'toast.commentDeleted': 'Comment deleted; the text is unchanged',

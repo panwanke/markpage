@@ -44,12 +44,21 @@ function createGroupId() {
   return `group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 }
 
+function uniqueGroupId(taken: Set<string>) {
+  let id = createGroupId()
+  while (taken.has(id)) id = createGroupId()
+  return id
+}
+
 /** 从任意输入（旧版本设置、损坏的 localStorage）还原出可用布局。 */
 export function normalizeLayout(value: unknown): SidebarLayout {
   const fallback = createDefaultLayout()
   if (!value || typeof value !== 'object') return fallback
   const raw = value as Partial<SidebarLayout>
   const seen = new Set<PanelId>()
+  // 组 id 必须唯一：moveGroup / activatePanel 都按 id 查找，重复 id 会让第二组永远操作不到，
+  // 同时给 React 列表制造重复 key。存储被改坏时这里兜住。
+  const seenGroupIds = new Set<string>()
   const groups: PanelGroup[] = []
   if (Array.isArray(raw.groups)) {
     raw.groups.forEach((candidate) => {
@@ -63,8 +72,12 @@ export function normalizeLayout(value: unknown): SidebarLayout {
         })
         : []
       if (!panels.length) return
+      const id = typeof group.id === 'string' && group.id && !seenGroupIds.has(group.id)
+        ? group.id
+        : uniqueGroupId(seenGroupIds)
+      seenGroupIds.add(id)
       groups.push({
-        id: typeof group.id === 'string' && group.id ? group.id : createGroupId(),
+        id,
         panels,
         active: isPanelId(group.active) && panels.includes(group.active) ? group.active : panels[0],
       })
@@ -100,7 +113,7 @@ export function movePanel(
     .filter((group) => group.panels.length > 0)
 
   if (target.groupId === null) {
-    groups.push({ id: createGroupId(), panels: [panel], active: panel })
+    groups.push({ id: uniqueGroupId(new Set(groups.map((group) => group.id))), panels: [panel], active: panel })
     return { ...layout, groups }
   }
 
@@ -132,14 +145,18 @@ export function closePanel(layout: SidebarLayout, panel: PanelId): SidebarLayout
   return { ...layout, groups }
 }
 
-/** 重新打开被关掉的面板：已经开着就只激活它。 */
+/** 重新打开被关掉的面板：已经开着就只激活它。两种情况都会把侧栏放出来。 */
 export function openPanel(layout: SidebarLayout, panel: PanelId): SidebarLayout {
   const existing = findPanelGroup(layout, panel)
-  if (existing) return activatePanel(layout, existing.id, panel)
+  if (existing) return { ...activatePanel(layout, existing.id, panel), visible: true }
   return {
     ...layout,
     visible: true,
-    groups: [...layout.groups, { id: createGroupId(), panels: [panel], active: panel }],
+    groups: [...layout.groups, {
+      id: uniqueGroupId(new Set(layout.groups.map((group) => group.id))),
+      panels: [panel],
+      active: panel,
+    }],
   }
 }
 

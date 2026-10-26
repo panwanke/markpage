@@ -25,7 +25,7 @@ export default function WorkspacePanel({ documents, activeId, onOpen, onNew }: W
           >
             <FileText size={15} />
             <span>
-              <strong>{document.name}</strong>
+              <strong>{document.name.trim() || t('document.untitled')}</strong>
               <small>
                 {document.open ? t('sidebar.opened') : t('sidebar.closed')}
                 {' · '}

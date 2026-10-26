@@ -56,12 +56,9 @@ import {
 import { createDefaultLayout, toggleSidebar } from './lib/layout'
 import { PluginRegistry } from './plugins/registry'
 import { focusModePlugin } from './plugins/registry'
-import { setLocale, useI18n } from './i18n'
-import type { InlineFormat, PageConfig, SelectionSnapshot } from './types'
+import { useI18n } from './i18n'
+import type { InlineFormat, MarkdownDocument as MarkdownDoc, PageConfig, SelectionSnapshot } from './types'
 import './App.css'
-
-// 语言要在首帧之前定下来：先按设置里存的语言渲染，避免中文界面闪一下再切英文。
-setLocale(loadSettings().locale)
 
 export default function App() {
   const { t, setLocale: changeLocale } = useI18n()
@@ -84,9 +81,16 @@ export default function App() {
   const activeDocument = documents.find((document) => document.id === activeId && document.open) ?? openDocuments[0]
   const markdown = activeDocument?.markdown ?? ''
   const rawConfig = useMemo(() => getPageConfig(markdown), [markdown])
-  // Frontmatter 缺 title 时用语言相关的占位标题，不把「未命名文档」写进英文界面。
+  // 「未命名」只存在于显示层：文档名留空即未命名，标题按当前语言现算，
+  // 这样切换语言时标签页、标题框与页面页眉三处始终一致。
+  const displayName = useCallback(
+    (document?: MarkdownDoc) => document?.name.trim() || t('document.untitled'),
+    [t],
+  )
   const config = useMemo(
-    () => (rawConfig.title === UNTITLED_TITLE ? { ...rawConfig, title: t('document.untitled') } : rawConfig),
+    () => (rawConfig.title.trim() === '' || rawConfig.title === UNTITLED_TITLE
+      ? { ...rawConfig, title: t('document.untitled') }
+      : rawConfig),
     [rawConfig, t],
   )
   const tree = useMemo(() => parseMarkdown(markdown), [markdown])
@@ -118,8 +122,8 @@ export default function App() {
   }, [settings, changeLocale])
 
   useEffect(() => {
-    document.title = activeDocument ? `${activeDocument.name} · ${t('brand.name')}` : t('brand.name')
-  }, [activeDocument, t])
+    document.title = activeDocument ? `${displayName(activeDocument)} · ${t('brand.name')}` : t('brand.name')
+  }, [activeDocument, displayName, t])
 
   // 外观设置落到 CSS 变量上：界面字体 / 界面字号缩放 / 正文字体。
   useEffect(() => {
@@ -365,6 +369,7 @@ export default function App() {
         <div className="document-identity">
           <input
             value={activeDocument.name}
+            placeholder={t('document.untitled')}
             aria-label={t('document.titleLabel')}
             onChange={(event) => updateActiveDocument(updatePageConfig(markdown, { title: event.target.value }), event.target.value)}
           />
@@ -389,7 +394,7 @@ export default function App() {
         <div className="tab-scroll">
           {openDocuments.map((document) => (
             <div className={`document-tab ${document.id === activeDocument.id ? 'active' : ''}`} key={document.id}>
-              <button className="tab-main" onClick={() => openDocument(document.id)}><FileText size={14} /><span>{document.name}</span></button>
+              <button className="tab-main" onClick={() => openDocument(document.id)}><FileText size={14} /><span>{displayName(document)}</span></button>
               <button className="tab-close" title={t('tabs.close')} onClick={() => closeDocument(document.id)}><X size={13} /></button>
             </div>
           ))}
@@ -427,7 +432,7 @@ export default function App() {
                 <button className={settings.viewMode === 'paged' ? 'active' : ''} title={t('editor.paged')} onClick={() => updateSettings({ viewMode: 'paged' })}><FileText size={16} /></button>
                 <button className={settings.viewMode === 'continuous' ? 'active' : ''} title={t('editor.continuous')} onClick={() => updateSettings({ viewMode: 'continuous' })}><ScrollText size={16} /></button>
               </div>
-              <button className={`icon-button ${layout.visible ? 'is-on' : ''}`} title={t('editor.toggleSidebar')} onClick={() => updateSettings({ layout: toggleSidebar(layout) })}>
+              <button className={`icon-button dock-toggle ${layout.visible ? 'is-on' : ''}`} title={t('editor.toggleSidebar')} onClick={() => updateSettings({ layout: toggleSidebar(layout) })}>
                 {layout.visible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
               </button>
               <button className={`icon-button ${settings.showComments ? 'is-on' : ''}`} title={t('editor.toggleComments')} onClick={() => updateSettings({ showComments: !settings.showComments })}><MessageSquare size={18} /><span className="toolbar-dot" /></button>
@@ -464,17 +469,17 @@ export default function App() {
               <span className="status-save-dot" />
               <span>{saveState === 'saved' ? t('status.saved') : t('status.syncing')}</span>
               <span className="status-divider">/</span>
-              <span>{t('status.words', { count: stats.words.toLocaleString() })}</span>
+              <span>{t('status.words', { count: stats.words })}</span>
               <span>{t('status.reading', { count: stats.readingMinutes })}</span>
             </div>
             {settings.viewMode === 'paged' && settings.editorMode === 'rendered' && (
               <div className="page-navigator">
                 <button disabled={activePage <= 1} onClick={() => goToPage(activePage - 1)}><ChevronLeft size={14} /></button>
-                <span>{t('status.page', { page: activePage, total: pageCount })}</span>
+                <span>{t('status.page', { page: activePage, total: pageCount, count: pageCount })}</span>
                 <button disabled={activePage >= pageCount} onClick={() => goToPage(activePage + 1)}><ChevronRight size={14} /></button>
               </div>
             )}
-            <div><span>{t('status.chars', { count: stats.characters.toLocaleString() })}</span><span className="status-divider">/</span><span>{t('status.markdown')}</span></div>
+            <div><span>{t('status.chars', { count: stats.characters })}</span><span className="status-divider">/</span><span>{t('status.markdown')}</span></div>
           </footer>
         </main>
 

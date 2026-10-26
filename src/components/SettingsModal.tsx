@@ -33,6 +33,9 @@ const SCALE_PRESETS: { value: number; labelKey: MessageKey }[] = [
 
 const PREVIEW_KEYS: MessageKey[] = ['brand.name', 'sidebar.examples', 'sidebar.workspace', 'sidebar.outline', 'status.saved', 'settings.appearance.previewWords']
 
+// 构建期注入；在 vitest / 未走 vite 的环境里没有这个全局，退化成 dev 而不是抛错。
+const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'
+
 export default function SettingsModal({
   config,
   userName,
@@ -60,7 +63,7 @@ export default function SettingsModal({
           <button className={tab === 'page' ? 'active' : ''} onClick={() => setTab('page')}><FileCog size={17} /> {t('settings.tab.page')}</button>
           <button className={tab === 'language' ? 'active' : ''} onClick={() => setTab('language')}><Languages size={17} /> {t('settings.tab.language')}</button>
           <button className={tab === 'plugins' ? 'active' : ''} onClick={() => setTab('plugins')}><Puzzle size={17} /> {t('settings.tab.plugins')}</button>
-          <div className="settings-version">MARKPAGE<br />VERSION 1.1.0</div>
+          <div className="settings-version">MARKPAGE<br />VERSION {APP_VERSION}</div>
         </div>
         <div className="settings-content">
           <button className="icon-button settings-close" title={t('settings.close')} onClick={onClose}><X size={19} /></button>
