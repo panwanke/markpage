@@ -27,6 +27,10 @@ dist-ssr
 .workbuddy/
 .workbuddy-ai/
 
+# EdgeOne CLI local artifacts
+.edgeone/
+.env
+
 # Governance tooling (ARA-lite / proj-tracker)
 # ara.yaml is the project manifest — keep it tracked (it's the ARA contract).
 # Only local action state / caches are ignored:
