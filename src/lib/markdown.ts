@@ -269,32 +269,75 @@ export function applyInlineFormat(
   while (start < end && /\s/.test(markdown[start])) start += 1
   while (end > start && /\s/.test(markdown[end - 1])) end -= 1
 
-  if (format === 'clear') {
-    // 清除格式时向外吞掉包裹选区的标记，否则只会删掉选区内部的符号。
-    const opening = /(?:\*\*|__|~~|`|<mark>|<span style="[^"]*">|<comment[^>]*>)$/.exec(markdown.slice(0, start))
-    const closing = /^(?:\*\*|__|~~|`|<\/mark>|<\/span>|<\/comment>)/.exec(markdown.slice(end))
-    if (opening) start -= opening[0].length
-    if (closing) end += closing[0].length
+  // 包裹标记一律成对识别：只有开标签紧贴选区起点、闭标签紧贴选区终点时才算「整段被包裹」，
+  // 因此可以逐层外扩，把嵌套的 <mark><span> 一起吞掉，避免反复套娃。
+  const MARK_OPEN = /<mark(?:\s[^>]*)?>$/i
+  const MARK_CLOSE = /^<\/mark>/i
+  const SPAN_OPEN = /<span\s+style="[^"]*">$/i
+  const SPAN_CLOSE = /^<\/span>/i
+  const ANY_OPEN = /(?:\*\*|__|~~|`|<mark(?:\s[^>]*)?>|<span\s+style="[^"]*">|<comment(?:\s[^>]*)?>)$/i
+  const ANY_CLOSE = /^(?:\*\*|__|~~|`|<\/mark>|<\/span>|<\/comment>)/i
+
+  function expand(open: RegExp, close: RegExp) {
+    let expanded = false
+    for (let layer = 0; layer < 4; layer += 1) {
+      const opening = open.exec(markdown.slice(0, start))
+      const closing = close.exec(markdown.slice(end))
+      if (!opening || !closing) break
+      start -= opening[0].length
+      end += closing[0].length
+      expanded = true
+    }
+    return expanded
   }
 
   const selected = markdown.slice(start, end)
   if (!selected) return markdown
 
-  let replacement = selected
+  // 已经是同一类包裹时，先脱掉旧标签再重新包裹 —— 换色是「替换」而不是「嵌套」。
+  let wasHighlighted = false
+  if (format === 'highlight') wasHighlighted = expand(MARK_OPEN, MARK_CLOSE)
+  else if (format === 'color') expand(SPAN_OPEN, SPAN_CLOSE)
+  else if (format === 'clear') expand(ANY_OPEN, ANY_CLOSE)
+
+  const inner = markdown.slice(start, end)
+  let replacement = inner
   switch (format) {
-    case 'bold': replacement = `**${selected}**`; break
-    case 'strikethrough': replacement = `~~${selected}~~`; break
-    case 'highlight': replacement = `<mark>${selected}</mark>`; break
-    case 'code': replacement = `\`${selected}\``; break
-    case 'color': replacement = `<span style="color:${option ?? '#6750a4'}">${selected}</span>`; break
-    case 'comment': replacement = `<comment id="${option}">${selected}</comment>`; break
+    case 'bold': replacement = `**${inner}**`; break
+    case 'strikethrough': replacement = `~~${inner}~~`; break
+    case 'highlight':
+      // 无颜色参数 = 切换：已经高亮过就取消，否则用默认底色。
+      if (wasHighlighted && !option) return markdown.slice(0, start) + stripMarkTags(inner) + markdown.slice(end)
+      replacement = option
+        ? `<mark style="background-color:${option}">${stripMarkTags(inner)}</mark>`
+        : `<mark>${stripMarkTags(inner)}</mark>`
+      break
+    case 'code': replacement = `\`${inner}\``; break
+    case 'color': replacement = `<span style="color:${option ?? '#6750a4'}">${stripSpanTags(inner)}</span>`; break
+    case 'comment': replacement = `<comment id="${option}">${stripCommentTags(inner)}</comment>`; break
     case 'clear':
-      replacement = selected
-        .replace(/<\/?(?:mark|span|comment)(?:\s[^>]*)?>/gi, '')
-        .replace(/(\*\*|__|~~|`)/g, '')
+      replacement = stripInlineTags(inner)
       break
   }
   return markdown.slice(0, start) + replacement + markdown.slice(end)
+}
+
+function stripMarkTags(value: string) {
+  return value.replace(/<mark(?:\s[^>]*)?>/gi, '').replace(/<\/mark>/gi, '')
+}
+
+function stripSpanTags(value: string) {
+  return value.replace(/<span\s+style="[^"]*">/gi, '').replace(/<\/span>/gi, '')
+}
+
+function stripCommentTags(value: string) {
+  return value.replace(/<comment(?:\s[^>]*)?>/gi, '').replace(/<\/comment>/gi, '')
+}
+
+function stripInlineTags(value: string) {
+  return value
+    .replace(/<\/?(?:mark|span|comment)(?:\s[^>]*)?>/gi, '')
+    .replace(/(\*\*|__|~~|`)/g, '')
 }
 
 export function getRootBlocks(tree: Root): RootContent[] {

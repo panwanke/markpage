@@ -122,6 +122,28 @@ describe('选区标注写回', () => {
     const source = '一段正文结束'
     expect(applyInlineFormat(source, selectionFor(source, '正文'), 'color', '#6750a4')).toContain('<span style="color:#6750a4">正文</span>')
   })
+
+  it('换高亮颜色是替换而不是嵌套', () => {
+    const source = '一段<mark>正文</mark>结束'
+    const next = applyInlineFormat(source, selectionFor(source, '正文'), 'highlight', '#c9f2d4')
+    expect(next).toBe('一段<mark style="background-color:#c9f2d4">正文</mark>结束')
+  })
+
+  it('对已高亮文本再次点击高亮即取消', () => {
+    const source = '一段<mark style="background-color:#c9f2d4">正文</mark>结束'
+    expect(applyInlineFormat(source, selectionFor(source, '正文'), 'highlight')).toBe('一段正文结束')
+  })
+
+  it('换文字颜色同样是替换，不会叠加多层 span', () => {
+    const source = '段落 <span style="color:#6750a4">正文</span> 结束'
+    const next = applyInlineFormat(source, selectionFor(source, '正文'), 'color', '#b3261e')
+    expect(next).toBe('段落 <span style="color:#b3261e">正文</span> 结束')
+  })
+
+  it('清除格式会一次脱掉嵌套的高亮与颜色', () => {
+    const source = '段落 <mark><span style="color:#6750a4">正文</span></mark> 结束'
+    expect(applyInlineFormat(source, selectionFor(source, '正文'), 'clear')).toBe('段落 正文 结束')
+  })
 })
 
 describe('评论完整生命周期', () => {

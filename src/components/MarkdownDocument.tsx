@@ -66,6 +66,9 @@ function renderNode(node: RootContent, key: string, context: RenderContext): Rea
         data-comment-id={id}
         onClick={(event) => {
           event.stopPropagation()
+          // 拖选文字后松手也会触发 click：此时不应弹出评论，否则带评论的段落像「选不中」。
+          const active = window.getSelection()
+          if (active && !active.isCollapsed && active.toString().trim()) return
           context.onCommentOpen(id)
         }}
       >

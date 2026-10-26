@@ -414,7 +414,7 @@ export default function App() {
       </div>
 
       {selection && !modal && settings.editorMode === 'rendered' && (
-        <div className="floating-toolbar" style={{ top: Math.max(116, selection.top - 54), left: Math.min(window.innerWidth - 180, Math.max(180, selection.left)) }}>
+        <div className="floating-toolbar" style={{ top: Math.max(116, selection.top - 54), left: Math.min(window.innerWidth - 190, Math.max(190, selection.left)) }}>
           <FormattingToolbar compact onFormat={handleFormat} onComment={() => setModal('comment')} />
         </div>
       )}

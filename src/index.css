@@ -25,4 +25,7 @@ button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid rgba(108, 92, 231, .45); outline-offset: 2px; }
-::selection { background: rgba(108, 92, 231, .2); }
+/* 选区必须足够显眼：黄色高亮底上的默认半透明紫几乎看不出来，会被误认为「不可选中」。 */
+::selection { background: rgba(108, 92, 231, .32); color: #17161d; }
+.markdown-body mark::selection, .markdown-body mark *::selection,
+.comment-anchor::selection, .comment-anchor *::selection { background: #b3a2f2; color: #17161d; }

@@ -143,7 +143,7 @@ button:disabled { cursor: default; opacity: .35; }
 .markdown-body img { display: block; max-width: 100%; height: auto; margin: 1.4em auto 1.5em; border-radius: 8px; box-shadow: 0 5px 20px rgba(32,33,40,.08); }
 .markdown-body figure { margin: 0; }
 .markdown-body hr { border: 0; border-top: 1px solid #e7e7eb; margin: 2em 0; }
-.markdown-body mark { background: #fff0a8; color: inherit; border-radius: 2px; padding: 0 .08em; }
+.markdown-body mark { background: #fff0a8; color: inherit; border-radius: 2px; padding: 0 .08em; user-select: text; cursor: text; }
 .markdown-body del { color: #96929a; }
 .markdown-body code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: .79em; background: #f2f1f6; color: #6550a4; padding: .15em .35em; border-radius: 4px; }
 .markdown-body pre { margin: 1.25em 0 1.5em; padding: 1.05em 1.15em; border-radius: 9px; background: #252630; color: #eee; overflow-x: auto; line-height: 1.65; box-shadow: 0 4px 14px rgba(30,30,40,.08); }
@@ -164,7 +164,8 @@ button:disabled { cursor: default; opacity: .35; }
 .markdown-body .katex { font-size: 1em; }
 .markdown-body .footnotes { margin-top: 2.2em; padding-top: 1em; border-top: 1px solid #e6e5ea; font-size: .72em; color: #74727b; }
 .markdown-body .footnotes h2 { font-size: 1.1em; border: 0; margin: 0; }
-.comment-anchor { background: linear-gradient(transparent 64%, rgba(166,150,238,.28) 64%); border-bottom: 1px dashed #8d7bdd; cursor: pointer; transition: background .15s; }
+.comment-anchor { background: linear-gradient(transparent 64%, rgba(166,150,238,.28) 64%); border-bottom: 1px dashed #8d7bdd; cursor: text; user-select: text; transition: background .15s; }
+.comment-anchor:hover { cursor: pointer; }
 .comment-anchor:hover, .comment-anchor.is-active { background: #e9e3ff; border-radius: 2px; }
 .comment-anchor.is-active { box-shadow: 0 0 0 2px #e9e3ff; }
 
