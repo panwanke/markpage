@@ -26,9 +26,11 @@ dist-ssr
 # WorkBuddy local project data (agent state, not source)
 .workbuddy/
 
-# Governance tooling (ARA-lite / proj-tracker) — local, not source
+# Governance tooling (ARA-lite / proj-tracker)
+# ara.yaml is the project manifest — keep it tracked (it's the ARA contract).
+# Only local action state / caches are ignored:
 ara.yaml
-ara.yml
-.ara/
-proj-tracker
-.proj-tracker/
+trace/
+logic/
+docs/
+AGENTS.md
