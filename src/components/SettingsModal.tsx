@@ -1,18 +1,40 @@
 import { useState } from 'react'
-import { Braces, Check, FileCog, Puzzle, UserRound, X } from 'lucide-react'
+import { Braces, Check, FileCog, Palette, Puzzle, RotateCcw, Type, UserRound, X } from 'lucide-react'
+import { DOC_FONTS, UI_FONTS, UI_SCALE_MAX, UI_SCALE_MIN } from '../lib/fonts'
 import type { PageConfig } from '../types'
 
 interface SettingsModalProps {
   config: PageConfig
   userName: string
+  uiFont: string
+  uiScale: number
+  docFont: string
   onUserName: (name: string) => void
+  onAppearance: (patch: { uiFont?: string; uiScale?: number; docFont?: string }) => void
   onConfig: (patch: Partial<PageConfig>) => void
   onClose: () => void
 }
 
-type SettingsTab = 'general' | 'page' | 'plugins'
+type SettingsTab = 'general' | 'appearance' | 'page' | 'plugins'
 
-export default function SettingsModal({ config, userName, onUserName, onConfig, onClose }: SettingsModalProps) {
+const SCALE_PRESETS = [
+  { value: 1, label: '紧凑' },
+  { value: 1.15, label: '标准' },
+  { value: 1.3, label: '较大' },
+  { value: 1.45, label: '超大' },
+]
+
+export default function SettingsModal({
+  config,
+  userName,
+  uiFont,
+  uiScale,
+  docFont,
+  onUserName,
+  onAppearance,
+  onConfig,
+  onClose,
+}: SettingsModalProps) {
   const [tab, setTab] = useState<SettingsTab>('general')
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
@@ -20,6 +42,7 @@ export default function SettingsModal({ config, userName, onUserName, onConfig, 
         <div className="settings-sidebar">
           <div className="settings-brand"><span>MP</span><strong>设置</strong></div>
           <button className={tab === 'general' ? 'active' : ''} onClick={() => setTab('general')}><UserRound size={17} /> 通用</button>
+          <button className={tab === 'appearance' ? 'active' : ''} onClick={() => setTab('appearance')}><Palette size={17} /> 外观</button>
           <button className={tab === 'page' ? 'active' : ''} onClick={() => setTab('page')}><FileCog size={17} /> 页面与排版</button>
           <button className={tab === 'plugins' ? 'active' : ''} onClick={() => setTab('plugins')}><Puzzle size={17} /> 插件</button>
           <div className="settings-version">MARKPAGE<br />VERSION 1.0.0</div>
@@ -35,6 +58,60 @@ export default function SettingsModal({ config, userName, onUserName, onConfig, 
             <div className="settings-section">
               <h3>数据与隐私</h3>
               <div className="storage-card"><span className="storage-icon"><Braces size={20} /></span><div><strong>本地优先存储</strong><p>文档和偏好仅保存在当前浏览器。导出 .md 可备份正文、排版设置与全部评论。</p></div><span className="status-pill"><Check size={12} /> 已启用</span></div>
+            </div>
+          </>}
+          {tab === 'appearance' && <>
+            <div className="settings-title"><h2>外观</h2><p>界面字体与字号只影响应用外壳，正文字体只影响纸张上的内容。</p></div>
+            <div className="settings-section">
+              <h3><Type size={13} /> 界面字体</h3>
+              <label className="settings-field">
+                <span>字体族</span>
+                <select value={uiFont} onChange={(event) => onAppearance({ uiFont: event.target.value })}>
+                  {UI_FONTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                <small>作用于顶栏、左右侧栏、状态栏与对话框。</small>
+              </label>
+              <label className="range-field">
+                <span>界面字号 <b>{Math.round(uiScale * 100)}%</b></span>
+                <input
+                  type="range"
+                  min={UI_SCALE_MIN}
+                  max={UI_SCALE_MAX}
+                  step="0.05"
+                  value={uiScale}
+                  onChange={(event) => onAppearance({ uiScale: Number(event.target.value) })}
+                />
+              </label>
+              <div className="scale-presets">
+                {SCALE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.value}
+                    className={Math.abs(uiScale - preset.value) < 0.001 ? 'active' : ''}
+                    onClick={() => onAppearance({ uiScale: preset.value })}
+                  >{preset.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="settings-section">
+              <h3>正文字体</h3>
+              <label className="settings-field">
+                <span>字体族</span>
+                <select value={docFont} onChange={(event) => onAppearance({ docFont: event.target.value })}>
+                  {DOC_FONTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                <small>正文字号与行距仍在「页面与排版」中按文档单独设置。</small>
+              </label>
+            </div>
+            <div className="settings-section">
+              <h3>实时预览</h3>
+              <div className="font-preview">
+                <div className="font-preview-bar"><span className="status-save-dot" />所有更改已保存<span className="status-divider">/</span>1,204 字 · 约 3 分钟</div>
+                <div className="font-preview-side">示例库 · 工作区 · 文档大纲</div>
+                <p className="font-preview-doc">墨页把排版、标注与评论都写回 Markdown，源文件始终是唯一真相。</p>
+              </div>
+              <button className="reset-appearance" onClick={() => onAppearance({ uiFont: 'system', uiScale: 1.15, docFont: 'serif' })}>
+                <RotateCcw size={13} /> 恢复默认外观
+              </button>
             </div>
           </>}
           {tab === 'page' && <>

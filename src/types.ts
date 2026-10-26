@@ -85,5 +85,11 @@ export interface WorkspaceSettings {
   editorMode: 'rendered' | 'source'
   showComments: boolean
   showOutline: boolean
+  /** 界面字体（UI_FONTS 的 value）。 */
+  uiFont: string
+  /** 界面字号缩放，1 = 原尺寸。 */
+  uiScale: number
+  /** 正文字体（DOC_FONTS 的 value）。 */
+  docFont: string
   exportConfig: ExportConfig
 }

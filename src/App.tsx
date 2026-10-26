@@ -39,6 +39,7 @@ import {
   updatePageConfig,
 } from './lib/markdown'
 import { buildExport, CLEAN_EXPORT } from './lib/export'
+import { DOC_FONTS, fontStack, UI_FONTS } from './lib/fonts'
 import { EXAMPLE_DOCUMENTS } from './data/examples'
 import {
   createDocument,
@@ -94,6 +95,14 @@ export default function App() {
   }, [documents])
 
   useEffect(() => saveSettings(settings), [settings])
+
+  // 外观设置落到 CSS 变量上：界面字体 / 界面字号缩放 / 正文字体。
+  useEffect(() => {
+    const root = document.documentElement.style
+    root.setProperty('--ui-font', fontStack(UI_FONTS, settings.uiFont))
+    root.setProperty('--ui-scale', String(settings.uiScale))
+    root.setProperty('--doc-font', fontStack(DOC_FONTS, settings.docFont))
+  }, [settings.uiFont, settings.uiScale, settings.docFont])
 
   // 打印前取消图片懒加载，否则未滚动到过的图片不会进入 PDF。
   useEffect(() => {
@@ -438,7 +447,17 @@ export default function App() {
         </div>
       )}
 
-      {modal === 'settings' && <SettingsModal config={config} userName={settings.userName} onUserName={(userName) => updateSettings({ userName })} onConfig={updateConfig} onClose={() => setModal(null)} />}
+      {modal === 'settings' && <SettingsModal
+        config={config}
+        userName={settings.userName}
+        uiFont={settings.uiFont}
+        uiScale={settings.uiScale}
+        docFont={settings.docFont}
+        onUserName={(userName) => updateSettings({ userName })}
+        onAppearance={(patch) => updateSettings(patch)}
+        onConfig={updateConfig}
+        onClose={() => setModal(null)}
+      />}
       {modal === 'export' && <ExportDialog
         name={activeDocument.name}
         markdown={markdown}
