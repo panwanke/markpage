@@ -1,4 +1,5 @@
 import { EMPTY_MARKDOWN, SAMPLE_MARKDOWN } from '../data/sample'
+import { CUSTOM_EXPORT_DEFAULT } from './export'
 import type { MarkdownDocument, WorkspaceSettings } from '../types'
 
 const DOCUMENTS_KEY = 'markpage.documents.v1'
@@ -10,6 +11,7 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   editorMode: 'rendered',
   showComments: true,
   showOutline: true,
+  exportConfig: CUSTOM_EXPORT_DEFAULT,
 }
 
 export function createDocument(markdown = EMPTY_MARKDOWN, name = '未命名文档'): MarkdownDocument {
@@ -53,12 +55,21 @@ export function saveSettings(settings: WorkspaceSettings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
 }
 
-export function downloadMarkdown(document: MarkdownDocument) {
-  const blob = new Blob([document.markdown], { type: 'text/markdown;charset=utf-8' })
+interface DownloadOptions {
+  /** 覆盖写出的内容，用于纯净 / 自定义导出。 */
+  markdown?: string
+  /** 覆盖文件名（不带扩展名）。 */
+  fileName?: string
+}
+
+export function downloadMarkdown(document: MarkdownDocument, options: DownloadOptions = {}) {
+  const content = options.markdown ?? document.markdown
+  const rawName = (options.fileName ?? document.name).replace(/\.md$/i, '')
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const anchor = window.document.createElement('a')
   anchor.href = url
-  anchor.download = `${document.name.replace(/[\\/:*?"<>|]/g, '-') || 'document'}.md`
+  anchor.download = `${rawName.replace(/[\\/:*?"<>|]/g, '-').trim() || 'document'}.md`
   anchor.click()
   URL.revokeObjectURL(url)
 }

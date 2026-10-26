@@ -4,7 +4,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Code2,
-  Download,
   FilePlus2,
   FileText,
   Import,
@@ -24,6 +23,8 @@ import CommentsPanel from './components/CommentsPanel'
 import SettingsModal from './components/SettingsModal'
 import CommentDialog from './components/CommentDialog'
 import GitHubStar from './components/GitHubStar'
+import ExportMenu from './components/ExportMenu'
+import ExportDialog from './components/ExportDialog'
 import {
   addComment,
   applyInlineFormat,
@@ -37,6 +38,7 @@ import {
   toggleCommentResolved,
   updatePageConfig,
 } from './lib/markdown'
+import { buildExport, CLEAN_EXPORT } from './lib/export'
 import { EXAMPLE_DOCUMENTS } from './data/examples'
 import {
   createDocument,
@@ -57,7 +59,7 @@ export default function App() {
   const [activeId, setActiveId] = useState('')
   const [selection, setSelection] = useState<SelectionSnapshot | null>(null)
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
-  const [modal, setModal] = useState<'settings' | 'comment' | null>(null)
+  const [modal, setModal] = useState<'settings' | 'comment' | 'export' | null>(null)
   const [saveState, setSaveState] = useState<'saving' | 'saved' | 'error'>('saved')
   const [toast, setToast] = useState('')
   const [focusMode, setFocusMode] = useState(false)
@@ -156,9 +158,26 @@ export default function App() {
     notify('标注已写回 Markdown')
   }, [selection, activeDocument, markdown, updateActiveDocument, notify])
 
+  // 三档导出共用同一个入口：直接导出 / 纯净导出 / 自定义导出。
   const handleExport = useCallback(() => {
     if (activeDocument) downloadMarkdown(activeDocument)
   }, [activeDocument])
+
+  const handleExportClean = useCallback(() => {
+    if (!activeDocument) return
+    downloadMarkdown(activeDocument, {
+      markdown: buildExport(markdown, CLEAN_EXPORT),
+      fileName: `${activeDocument.name}-纯净版`,
+    })
+    notify('已导出纯净 Markdown')
+  }, [activeDocument, markdown, notify])
+
+  const handleExportCustom = useCallback((fileName: string, content: string) => {
+    if (!activeDocument) return
+    downloadMarkdown(activeDocument, { markdown: content, fileName })
+    setModal(null)
+    notify('已导出自定义 Markdown')
+  }, [activeDocument, notify])
 
   useEffect(() => {
     const handleKeyboard = (event: KeyboardEvent) => {
@@ -285,7 +304,7 @@ export default function App() {
         <div className="header-actions">
           <input ref={fileInputRef} type="file" accept=".md,.markdown,.txt" multiple hidden onChange={(event) => importFiles(event.target.files)} />
           <button className="header-button" onClick={() => fileInputRef.current?.click()}><Import size={16} /><span>导入</span></button>
-          <button className="header-button" onClick={handleExport}><Download size={16} /><span>导出 Markdown</span></button>
+          <ExportMenu onDirect={handleExport} onClean={handleExportClean} onCustom={() => setModal('export')} />
           <button className="icon-button" title="打印 / 导出 PDF" onClick={() => window.print()}><Printer size={18} /></button>
           <span className="header-divider" />
           <GitHubStar />
@@ -420,6 +439,14 @@ export default function App() {
       )}
 
       {modal === 'settings' && <SettingsModal config={config} userName={settings.userName} onUserName={(userName) => updateSettings({ userName })} onConfig={updateConfig} onClose={() => setModal(null)} />}
+      {modal === 'export' && <ExportDialog
+        name={activeDocument.name}
+        markdown={markdown}
+        config={settings.exportConfig}
+        onConfig={(exportConfig) => updateSettings({ exportConfig })}
+        onDownload={handleExportCustom}
+        onClose={() => setModal(null)}
+      />}
       {modal === 'comment' && selection && <CommentDialog quote={selection.text} userName={settings.userName} onCancel={() => setModal(null)} onSubmit={submitComment} />}
       {toast && <div className="toast"><Check size={15} />{toast}</div>}
     </div>
