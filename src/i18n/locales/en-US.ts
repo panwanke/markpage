@@ -48,6 +48,18 @@ export const enUS: Messages = {
   'sidebar.moveGroup': 'Drag to reorder panel groups',
   'sidebar.closePanel': 'Close panel',
 
+  'workspace.menu': 'Document actions',
+  'workspace.open': 'Open',
+  'workspace.rename': 'Rename',
+  'workspace.renameHint': 'Enter to confirm, Esc to cancel',
+  'workspace.duplicate': 'Duplicate',
+  'workspace.export': 'Export .md',
+  'workspace.close': 'Close (keep in list)',
+  'workspace.delete': 'Delete document',
+  'workspace.deleteConfirm': 'Delete “{name}”? It will be removed from this device for good.',
+  'workspace.copySuffix': ' copy',
+  'workspace.itemHint': 'Click to open, right-click for more',
+
   'editor.rendered': 'Rendered',
   'editor.source': 'Source',
   'editor.split': 'Split',
@@ -298,6 +310,9 @@ export const enUS: Messages = {
   'toast.replyAdded': 'Reply appended to the comment callout',
   'toast.commentDeleted': 'Comment deleted; the text is unchanged',
   'toast.layoutReset': 'Sidebar layout reset',
+  'toast.documentDeleted': 'Deleted “{name}”',
+  'toast.documentDuplicated': 'Duplicated as “{name}”',
+  'toast.documentRenamed': 'Renamed to “{name}”',
 
   'common.cancel': 'Cancel',
   'common.close': 'Close',

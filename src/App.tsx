@@ -449,6 +449,64 @@ export default function App() {
     }
   }
 
+  /** 删除是彻底移除（同时关掉标签页），和「关闭」区分开。 */
+  function deleteDocument(id: string) {
+    const target = documents.find((document) => document.id === id)
+    if (!target) return
+    const name = displayName(target)
+    if (!window.confirm(t('workspace.deleteConfirm', { name }))) return
+    const remaining = documents.filter((document) => document.id !== id)
+    if (!remaining.length) {
+      const fallback = createDocument()
+      setDocuments([fallback])
+      setActiveId(fallback.id)
+    } else {
+      setDocuments(remaining)
+      if (activeDocument?.id === id) {
+        setActiveId((remaining.find((document) => document.open) ?? remaining[0]).id)
+      }
+    }
+    setSelection(null)
+    setSelectionMenu(null)
+    notify(t('toast.documentDeleted', { name }))
+  }
+
+  /** 复制一份放在原文档后面：内容、字数与评论原样带走，不共享任何状态。 */
+  function duplicateDocument(id: string) {
+    const source = documents.find((document) => document.id === id)
+    if (!source) return
+    const copyName = source.name ? `${source.name}${t('workspace.copySuffix')}` : ''
+    // 标题跟着新名字走，免得副本的页眉还写着原标题。
+    const copyMarkdown = copyName ? updatePageConfig(source.markdown, { title: copyName }) : source.markdown
+    const copy = createDocument(copyMarkdown, copyName)
+    setDocuments((current) => {
+      const index = current.findIndex((document) => document.id === id)
+      const next = [...current]
+      next.splice(index < 0 ? next.length : index + 1, 0, copy)
+      return next
+    })
+    setActiveId(copy.id)
+    setSelection(null)
+    notify(t('toast.documentDuplicated', { name: displayName(copy) }))
+  }
+
+  /** 重命名同步写进 Frontmatter 标题，标签页、工作区与页眉始终一致。 */
+  function renameDocument(id: string, name: string) {
+    setDocuments((current) => current.map((document) => {
+      if (document.id !== id) return document
+      const nextMarkdown = document.name === name ? document.markdown : updatePageConfig(document.markdown, { title: name })
+      return { ...document, name, markdown: nextMarkdown, updatedAt: new Date().toISOString() }
+    }))
+    notify(t('toast.documentRenamed', { name: name || t('document.untitled') }))
+  }
+
+  function exportDocument(id: string) {
+    const target = documents.find((document) => document.id === id)
+    if (!target) return
+    downloadMarkdown(target)
+    notify(t('toast.markdownExported'))
+  }
+
   async function importFiles(files: FileList | null) {
     if (!files?.length) return
     const imported = await Promise.all(Array.from(files).map(async (file) => createDocument(
@@ -501,7 +559,19 @@ export default function App() {
       id: 'workspace',
       title: t('sidebar.workspace'),
       badge: documents.length,
-      content: <WorkspacePanel documents={documents} activeId={activeDocument?.id ?? ''} onOpen={openDocument} onNew={newDocument} />,
+      content: (
+        <WorkspacePanel
+          documents={documents}
+          activeId={activeDocument?.id ?? ''}
+          onOpen={openDocument}
+          onNew={newDocument}
+          onRename={renameDocument}
+          onDuplicate={duplicateDocument}
+          onExport={exportDocument}
+          onClose={closeDocument}
+          onDelete={deleteDocument}
+        />
+      ),
     },
     {
       id: 'outline',

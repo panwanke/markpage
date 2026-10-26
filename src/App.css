@@ -101,7 +101,11 @@ button:disabled { cursor: default; opacity: .35; }
 .panel-action { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border-radius: 5px; color: #8a8896; font-size: calc(10px * var(--ui-scale)); }
 .panel-action:hover { background: #f0eff5; color: var(--accent); }
 .document-list { display: flex; flex-direction: column; gap: 2px; }
-.document-list-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: 7px; text-align: left; color: #8c8d97; width: 100%; }
+.document-list-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: 7px; text-align: left; color: #8c8d97; width: 100%; cursor: pointer; }
+.document-list-item:focus-visible { outline: 2px solid rgba(108,92,231,.45); outline-offset: 1px; }
+.document-rename { flex: 1; }
+.document-rename input { width: 100%; padding: 3px 6px; border: 1px solid #c1b7ea; border-radius: 5px; background: white; color: #3c3d45; font-size: calc(12px * var(--ui-scale)); }
+.document-rename small { color: #a0a1aa; font-size: calc(10px * var(--ui-scale)); }
 .document-list-item:hover { background: #f0eff5; }
 .document-list-item.active { background: #eeecfa; color: var(--accent); }
 .document-list-item > span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }

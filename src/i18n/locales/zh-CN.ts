@@ -46,6 +46,18 @@ export const zhCN = {
   'sidebar.moveGroup': '拖动调整面板组顺序',
   'sidebar.closePanel': '关闭面板',
 
+  'workspace.menu': '文档操作',
+  'workspace.open': '打开',
+  'workspace.rename': '重命名',
+  'workspace.renameHint': '回车确认，Esc 取消',
+  'workspace.duplicate': '复制一份',
+  'workspace.export': '导出 .md',
+  'workspace.close': '关闭（保留在列表中）',
+  'workspace.delete': '删除文档',
+  'workspace.deleteConfirm': '删除「{name}」？文档会从本地工作区彻底移除，无法撤销。',
+  'workspace.copySuffix': ' 副本',
+  'workspace.itemHint': '点击打开，右键更多操作',
+
   'editor.rendered': '排版',
   'editor.source': '源码',
   'editor.split': '双栏',
@@ -290,6 +302,9 @@ export const zhCN = {
   'toast.replyAdded': '回复已追加到评论 Callout',
   'toast.commentDeleted': '评论已删除，原文保持不变',
   'toast.layoutReset': '侧边栏已复位',
+  'toast.documentDeleted': '已删除「{name}」',
+  'toast.documentDuplicated': '已复制为「{name}」',
+  'toast.documentRenamed': '已重命名为「{name}」',
 
   'common.cancel': '取消',
   'common.close': '关闭',
