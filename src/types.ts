@@ -11,6 +11,9 @@ export interface MarkdownDocument {
 
 export type PaperSize = 'A4' | 'Letter'
 
+/** 排版 / 源码 / 双栏（左边排版、右边源码，改哪边另一边都跟着变）。 */
+export type EditorMode = 'rendered' | 'source' | 'split'
+
 export interface PageConfig {
   title: string
   header: string
@@ -88,7 +91,11 @@ export interface WorkspaceSettings {
   /** 侧边栏停靠布局：面板分组、宽度与显隐。 */
   layout: SidebarLayout
   viewMode: 'paged' | 'continuous'
-  editorMode: 'rendered' | 'source'
+  editorMode: EditorMode
+  /** 双栏视图里源码栏占的宽度比例（0.22 – 0.75）。 */
+  splitRatio: number
+  /** 修订模式：新增内容写 `<ins>`、删除内容包 `~…~`。 */
+  revisionMode: boolean
   showComments: boolean
   /** 界面字体（UI_FONTS 的 value）。 */
   uiFont: string

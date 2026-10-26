@@ -4,6 +4,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Code2,
+  Columns2,
+  FileDiff,
   FileText,
   Import,
   MessageSquare,
@@ -17,9 +19,13 @@ import {
 } from 'lucide-react'
 import MarkdownDocument from './components/MarkdownDocument'
 import FormattingToolbar from './components/FormattingToolbar'
+import type { RevisionControls } from './components/FormattingToolbar'
 import CommentsPanel from './components/CommentsPanel'
 import SettingsModal from './components/SettingsModal'
 import CommentDialog from './components/CommentDialog'
+import RevisionDialog from './components/RevisionDialog'
+import RevisionPopover from './components/RevisionPopover'
+import SourceEditor from './components/SourceEditor'
 import GitHubStar from './components/GitHubStar'
 import ExportMenu from './components/ExportMenu'
 import ExportDialog from './components/ExportDialog'
@@ -42,6 +48,17 @@ import {
   UNTITLED_TITLE,
   updatePageConfig,
 } from './lib/markdown'
+import {
+  acceptRevisions,
+  countRevisions,
+  findRevisionAt,
+  insertRevision,
+  isRevisionLocked,
+  markDeletion,
+  rejectRevisions,
+  resolveRevision,
+} from './lib/revision'
+import type { RevisionAction, RevisionMark } from './lib/revision'
 import { buildExport, CLEAN_EXPORT } from './lib/export'
 import { DOC_FONTS, fontStack, UI_FONTS } from './lib/fonts'
 import { EXAMPLE_DOCUMENTS } from './data/examples'
@@ -52,12 +69,21 @@ import {
   loadSettings,
   saveDocuments,
   saveSettings,
+  SPLIT_RATIO_MAX,
+  SPLIT_RATIO_MIN,
+  DEFAULT_SPLIT_RATIO,
 } from './lib/storage'
 import { createDefaultLayout, toggleSidebar } from './lib/layout'
 import { PluginRegistry } from './plugins/registry'
 import { focusModePlugin } from './plugins/registry'
 import { useI18n } from './i18n'
-import type { InlineFormat, MarkdownDocument as MarkdownDoc, PageConfig, SelectionSnapshot } from './types'
+import type {
+  EditorMode,
+  InlineFormat,
+  MarkdownDocument as MarkdownDoc,
+  PageConfig,
+  SelectionSnapshot,
+} from './types'
 import './App.css'
 
 export default function App() {
@@ -67,15 +93,18 @@ export default function App() {
   const [activeId, setActiveId] = useState('')
   const [selection, setSelection] = useState<SelectionSnapshot | null>(null)
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
-  const [modal, setModal] = useState<'settings' | 'comment' | 'export' | null>(null)
+  const [modal, setModal] = useState<'settings' | 'comment' | 'export' | 'revision' | null>(null)
+  const [revisionPopover, setRevisionPopover] = useState<{ mark: RevisionMark; top: number; left: number } | null>(null)
   const [saveState, setSaveState] = useState<'saving' | 'saved' | 'error'>('saved')
   const [toast, setToast] = useState('')
   const [focusMode, setFocusMode] = useState(false)
   const [pageCount, setPageCount] = useState(1)
   const [activePage, setActivePage] = useState(1)
   const [toolbarLeft, setToolbarLeft] = useState(0)
+  const [splitRatio, setSplitRatio] = useState(settings.splitRatio)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const floatingToolbarRef = useRef<HTMLDivElement>(null)
+  const splitDragRef = useRef<{ x: number; ratio: number; width: number } | null>(null)
 
   const openDocuments = documents.filter((document) => document.open)
   const activeDocument = documents.find((document) => document.id === activeId && document.open) ?? openDocuments[0]
@@ -97,7 +126,9 @@ export default function App() {
   const outline = useMemo(() => getOutline(tree), [tree])
   const threads = useMemo(() => getCommentThreads(markdown, t('comments.missingAnchor')), [markdown, t])
   const stats = useMemo(() => getMarkdownStats(markdown), [markdown])
+  const revisions = useMemo(() => countRevisions(markdown), [markdown])
   const layout = settings.layout
+  const mode = settings.editorMode
 
   useEffect(() => {
     if (activeDocument && activeId !== activeDocument.id) setActiveId(activeDocument.id)
@@ -204,6 +235,108 @@ export default function App() {
     notify(t('toast.formatApplied'))
   }, [selection, activeDocument, markdown, updateActiveDocument, notify, t])
 
+  function switchMode(next: EditorMode) {
+    if (next === mode) return
+    // 切走排版视图时，正文里的选区已经无效了，顺手清掉免得浮层留在屏幕上。
+    if (next === 'source') {
+      setSelection(null)
+      window.getSelection()?.removeAllRanges()
+    }
+    updateSettings({ editorMode: next })
+  }
+
+  /** 需要滚到正文某个位置时（大纲、评论定位），只在纯源码模式下切回排版。 */
+  function ensureRendered() {
+    if (mode === 'source') updateSettings({ editorMode: 'rendered' })
+  }
+
+  /** 公式与代码块不支持修订，命中就提示一句并放弃这次操作。 */
+  function ensureRevivable(start: number, end: number) {
+    if (!isRevisionLocked(markdown, start, end)) return true
+    notify(t('revision.locked'))
+    return false
+  }
+
+  function handleMarkDelete() {
+    if (!selection || !ensureRevivable(selection.start, selection.end)) return
+    const next = markDeletion(markdown, selection)
+    if (next === markdown) return
+    updateActiveDocument(next)
+    window.getSelection()?.removeAllRanges()
+    setSelection(null)
+    notify(t('toast.revisionMarked'))
+  }
+
+  function submitRevision(content: string) {
+    if (!selection || !ensureRevivable(selection.start, selection.end)) return
+    const next = insertRevision(markdown, selection, content)
+    if (next === markdown) return
+    updateActiveDocument(next)
+    window.getSelection()?.removeAllRanges()
+    setSelection(null)
+    setModal(null)
+    notify(t('toast.revisionInserted'))
+  }
+
+  function openRevision(offset: number, x: number, y: number) {
+    const mark = findRevisionAt(markdown, offset)
+    if (!mark) return
+    setRevisionPopover({
+      mark,
+      top: Math.min(window.innerHeight - 120, y + 16),
+      left: Math.min(window.innerWidth - 130, Math.max(130, x)),
+    })
+  }
+
+  function resolveOneRevision(action: RevisionAction) {
+    if (!revisionPopover) return
+    updateActiveDocument(resolveRevision(markdown, revisionPopover.mark, action))
+    setRevisionPopover(null)
+    notify(action === 'accept' ? t('toast.revisionAccepted') : t('toast.revisionRejected'))
+  }
+
+  function resolveAllRevisions(action: RevisionAction) {
+    const next = action === 'accept' ? acceptRevisions(markdown) : rejectRevisions(markdown)
+    if (next === markdown) return
+    updateActiveDocument(next)
+    setRevisionPopover(null)
+    notify(t(action === 'accept' ? 'toast.revisionsAccepted' : 'toast.revisionsRejected', { count: revisions.total }))
+  }
+
+  function startSplitDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const container = event.currentTarget.parentElement
+    if (!container) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    splitDragRef.current = { x: event.clientX, ratio: splitRatio, width: container.getBoundingClientRect().width }
+    document.body.classList.add('is-resizing-columns')
+  }
+
+  function moveSplitDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = splitDragRef.current
+    if (!drag) return
+    // 往左拖 = 源码栏变宽，所以位移取反。
+    const next = drag.ratio + (drag.x - event.clientX) / drag.width
+    setSplitRatio(Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, next)))
+  }
+
+  function endSplitDrag(event: React.PointerEvent<HTMLDivElement>) {
+    if (!splitDragRef.current) return
+    splitDragRef.current = null
+    document.body.classList.remove('is-resizing-columns')
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    updateSettings({ splitRatio })
+  }
+
+  const revisionControls: RevisionControls = {
+    enabled: settings.revisionMode,
+    total: revisions.total,
+    onToggle: () => updateSettings({ revisionMode: !settings.revisionMode }),
+    onMarkDelete: handleMarkDelete,
+    onInsert: () => setModal('revision'),
+    onAcceptAll: () => resolveAllRevisions('accept'),
+    onRejectAll: () => resolveAllRevisions('reject'),
+  }
+
   // 三档导出共用同一个入口：直接导出 / 纯净导出 / 自定义导出。
   const handleExport = useCallback(() => {
     if (activeDocument) downloadMarkdown(activeDocument)
@@ -301,7 +434,8 @@ export default function App() {
   }
 
   function locateComment(id: string) {
-    updateSettings({ showComments: true, editorMode: 'rendered' })
+    updateSettings({ showComments: true })
+    ensureRendered()
     setActiveCommentId(id)
     window.setTimeout(() => {
       document.querySelector(`.paper-page [data-comment-id="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -349,7 +483,7 @@ export default function App() {
         <OutlinePanel
           outline={outline}
           onSelect={(id) => {
-            updateSettings({ editorMode: 'rendered' })
+            ensureRendered()
             window.setTimeout(() => document.querySelector(`.paper-page #${CSS.escape(id)}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30)
           }}
         />
@@ -421,16 +555,18 @@ export default function App() {
         <main className="editor-area">
           <div className="editor-toolbar">
             <div className="mode-switch">
-              <button className={settings.editorMode === 'rendered' ? 'active' : ''} onClick={() => updateSettings({ editorMode: 'rendered' })}><ScrollText size={15} />{t('editor.rendered')}</button>
-              <button className={settings.editorMode === 'source' ? 'active' : ''} onClick={() => { updateSettings({ editorMode: 'source' }); setSelection(null) }}><Code2 size={15} />{t('editor.source')}</button>
+              <button className={mode === 'rendered' ? 'active' : ''} onClick={() => switchMode('rendered')} title={t('editor.renderedHint')}><ScrollText size={15} />{t('editor.rendered')}</button>
+              <button className={mode === 'split' ? 'active' : ''} onClick={() => switchMode('split')} title={t('editor.splitHint')}><Columns2 size={15} />{t('editor.split')}</button>
+              <button className={mode === 'source' ? 'active' : ''} onClick={() => switchMode('source')} title={t('editor.sourceHint')}><Code2 size={15} />{t('editor.source')}</button>
             </div>
             <div className="main-format-tools">
-              <FormattingToolbar disabled={!selection || settings.editorMode === 'source'} onFormat={handleFormat} onComment={() => selection && setModal('comment')} />
+              <FormattingToolbar disabled={!selection} revision={revisionControls} onFormat={handleFormat} onComment={() => selection && setModal('comment')} />
             </div>
             <div className="view-actions">
-              <div className="view-switch" title={t('editor.paged')}>
-                <button className={settings.viewMode === 'paged' ? 'active' : ''} title={t('editor.paged')} onClick={() => updateSettings({ viewMode: 'paged' })}><FileText size={16} /></button>
-                <button className={settings.viewMode === 'continuous' ? 'active' : ''} title={t('editor.continuous')} onClick={() => updateSettings({ viewMode: 'continuous' })}><ScrollText size={16} /></button>
+              {/* 双栏下左栏固定连续视图：纸张是 794px 宽，塞进半屏只会横着滚动。 */}
+              <div className="view-switch" title={mode === 'split' ? t('editor.splitPagedHint') : t('editor.paged')}>
+                <button className={settings.viewMode === 'paged' && mode !== 'split' ? 'active' : ''} title={t('editor.paged')} disabled={mode === 'split'} onClick={() => updateSettings({ viewMode: 'paged' })}><FileText size={16} /></button>
+                <button className={settings.viewMode === 'continuous' || mode === 'split' ? 'active' : ''} title={t('editor.continuous')} disabled={mode === 'split'} onClick={() => updateSettings({ viewMode: 'continuous' })}><ScrollText size={16} /></button>
               </div>
               <button className={`icon-button dock-toggle ${layout.visible ? 'is-on' : ''}`} title={t('editor.toggleSidebar')} onClick={() => updateSettings({ layout: toggleSidebar(layout) })}>
                 {layout.visible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
@@ -439,28 +575,46 @@ export default function App() {
             </div>
           </div>
 
-          <div className={`editor-content ${settings.editorMode === 'source' ? 'source-mode' : ''}`}>
-            {settings.editorMode === 'rendered' ? (
-              <MarkdownDocument
-                markdown={markdown}
-                config={config}
-                viewMode={settings.viewMode}
-                activeCommentId={activeCommentId}
-                onSelection={setSelection}
-                onCommentOpen={locateComment}
-                onPageCount={handlePageCount}
-              />
-            ) : (
-              <div className="source-editor-wrap">
-                <div className="source-editor-meta"><span>MARKDOWN</span><span>{t('editor.sourceMeta')}</span></div>
-                <textarea
-                  className="source-editor"
-                  value={markdown}
-                  spellCheck={false}
-                  aria-label={t('editor.sourceLabel')}
-                  onChange={(event) => updateActiveDocument(event.target.value)}
+          <div className={`editor-content mode-${mode}`}>
+            {mode !== 'source' && (
+              <div className="editor-pane">
+                <MarkdownDocument
+                  markdown={markdown}
+                  config={config}
+                  viewMode={mode === 'split' ? 'continuous' : settings.viewMode}
+                  activeCommentId={activeCommentId}
+                  revisionMode={settings.revisionMode}
+                  onSelection={setSelection}
+                  onCommentOpen={locateComment}
+                  onRevisionOpen={openRevision}
+                  onPageCount={handlePageCount}
                 />
               </div>
+            )}
+            {mode !== 'rendered' && (
+              <>
+                {mode === 'split' && (
+                  <div
+                    className="split-resizer"
+                    title={t('editor.splitDrag')}
+                    onPointerDown={startSplitDrag}
+                    onPointerMove={moveSplitDrag}
+                    onPointerUp={endSplitDrag}
+                    onPointerCancel={endSplitDrag}
+                    onDoubleClick={() => { setSplitRatio(DEFAULT_SPLIT_RATIO); updateSettings({ splitRatio: DEFAULT_SPLIT_RATIO }) }}
+                  />
+                )}
+                <SourceEditor
+                  value={markdown}
+                  revisionMode={settings.revisionMode}
+                  compact={mode === 'split'}
+                  label={t('editor.sourceLabel')}
+                  heading={t('editor.sourceHeading')}
+                  meta={mode === 'split' ? t('editor.splitMeta') : t('editor.sourceMeta')}
+                  style={mode === 'split' ? { flexBasis: `${splitRatio * 100}%` } : undefined}
+                  onChange={updateActiveDocument}
+                />
+              </>
             )}
           </div>
 
@@ -471,8 +625,17 @@ export default function App() {
               <span className="status-divider">/</span>
               <span>{t('status.words', { count: stats.words })}</span>
               <span>{t('status.reading', { count: stats.readingMinutes })}</span>
+              {revisions.total > 0 && (
+                <button
+                  className={`revision-chip ${settings.revisionMode ? 'is-on' : ''}`}
+                  title={t('revision.chipHint')}
+                  onClick={() => updateSettings({ revisionMode: !settings.revisionMode })}
+                >
+                  <FileDiff size={12} />{t('revision.count', { count: revisions.total })}
+                </button>
+              )}
             </div>
-            {settings.viewMode === 'paged' && settings.editorMode === 'rendered' && (
+            {settings.viewMode === 'paged' && mode === 'rendered' && (
               <div className="page-navigator">
                 <button disabled={activePage <= 1} onClick={() => goToPage(activePage - 1)}><ChevronLeft size={14} /></button>
                 <span>{t('status.page', { page: activePage, total: pageCount, count: pageCount })}</span>
@@ -498,9 +661,9 @@ export default function App() {
         />}
       </div>
 
-      {selection && !modal && settings.editorMode === 'rendered' && (
+      {selection && !modal && mode !== 'source' && (
         <div ref={floatingToolbarRef} className="floating-toolbar" style={{ top: Math.max(116, selection.top - 54), left: toolbarLeft }}>
-          <FormattingToolbar compact onFormat={handleFormat} onComment={() => setModal('comment')} />
+          <FormattingToolbar compact revision={revisionControls} onFormat={handleFormat} onComment={() => setModal('comment')} />
         </div>
       )}
 
@@ -527,6 +690,23 @@ export default function App() {
         onClose={() => setModal(null)}
       />}
       {modal === 'comment' && selection && <CommentDialog quote={selection.text} userName={settings.userName} onCancel={() => setModal(null)} onSubmit={submitComment} />}
+      {modal === 'revision' && selection && (
+        <RevisionDialog
+          quote={selection.text}
+          replacing={selection.end > selection.start}
+          onCancel={() => setModal(null)}
+          onSubmit={submitRevision}
+        />
+      )}
+      {revisionPopover && (
+        <RevisionPopover
+          mark={revisionPopover.mark}
+          top={revisionPopover.top}
+          left={revisionPopover.left}
+          onResolve={resolveOneRevision}
+          onClose={() => setRevisionPopover(null)}
+        />
+      )}
       {toast && <div className="toast"><Check size={15} />{toast}</div>}
     </div>
   )

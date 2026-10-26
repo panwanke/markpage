@@ -11,8 +11,11 @@ interface MarkdownDocumentProps {
   config: PageConfig
   viewMode: 'paged' | 'continuous'
   activeCommentId: string | null
+  /** 修订模式下正文里的修订标记可以点开「接受 / 拒绝」。 */
+  revisionMode: boolean
   onSelection: (selection: SelectionSnapshot | null) => void
   onCommentOpen: (id: string) => void
+  onRevisionOpen: (offset: number, x: number, y: number) => void
   onPageCount: (count: number) => void
 }
 
@@ -149,8 +152,10 @@ export default function MarkdownDocument({
   config,
   viewMode,
   activeCommentId,
+  revisionMode,
   onSelection,
   onCommentOpen,
+  onRevisionOpen,
   onPageCount,
 }: MarkdownDocumentProps) {
   const { t } = useI18n()
@@ -235,11 +240,26 @@ export default function MarkdownDocument({
     return content.map((node, index) => renderNode(node, `block-${index}`, context))
   }
 
+  function handleRevisionClick(event: React.MouseEvent) {
+    if (!revisionMode) return
+    const target = (event.target as HTMLElement).closest<HTMLElement>('.rev-ins, .rev-del')
+    if (!target) return
+    // 拖选文字后松手也会触发 click：此时不该弹卡片，否则带修订的段落像「选不中」。
+    const active = window.getSelection()
+    if (active && !active.isCollapsed && active.toString().trim()) return
+    const inner = target.querySelector<HTMLElement>('[data-source-start]')
+    const offset = Number(inner?.dataset.sourceStart)
+    if (!Number.isFinite(offset)) return
+    event.stopPropagation()
+    onRevisionOpen(offset, event.clientX, event.clientY)
+  }
+
   return (
     <div
       ref={viewportRef}
-      className={`document-viewport ${viewMode === 'continuous' ? 'is-continuous' : ''}`}
+      className={`document-viewport ${viewMode === 'continuous' ? 'is-continuous' : ''} ${revisionMode ? 'is-revising' : ''}`}
       onMouseUp={handleSelection}
+      onClick={handleRevisionClick}
       onMouseLeave={() => {
         if (!window.getSelection()?.toString()) onSelection(null)
       }}

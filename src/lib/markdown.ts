@@ -83,13 +83,96 @@ function rehypeSourceMap() {
   return (tree: Root) => wrapTextNodes(tree)
 }
 
+// 修订标记：`~删除~` 渲染成 <del class="rev-del">，`<ins>` 加一个可点击的类名。
+// 只在同一个文本节点内配对，因此切出来的每一段都能带上准确的源码偏移。
+const REVISION_DELETE = /~([^\s~](?:[^~\n]*[^\s~])?)~/g
+
+type HastPoint = NonNullable<Text['position']>['start']
+type HastPosition = NonNullable<Text['position']>
+
+function pointAt(base: HastPoint, value: string, index: number): HastPoint {
+  const before = value.slice(0, index)
+  const breaks = (before.match(/\n/g) ?? []).length
+  const lastBreak = before.lastIndexOf('\n')
+  return {
+    line: base.line + breaks,
+    column: breaks === 0 ? base.column + index : index - lastBreak,
+    offset: (base.offset ?? 0) + index,
+  }
+}
+
+function slicePosition(position: HastPosition | undefined, value: string, from: number, to: number): HastPosition | undefined {
+  if (!position?.start) return undefined
+  return { start: pointAt(position.start, value, from), end: pointAt(position.start, value, to) }
+}
+
+/** 代码与公式里的波浪号不是修订标记，原样留着。 */
+function isRevisionOpaque(parent: Element | Root) {
+  if (parent.type !== 'element') return false
+  if (parent.tagName === 'code' || parent.tagName === 'pre') return true
+  const className = Array.isArray(parent.properties?.className) ? parent.properties.className.map(String) : []
+  return className.includes('math')
+}
+
+function splitRevisionText(node: Text): RootContent[] {
+  const value = node.value
+  const position = node.position
+  const parts: RootContent[] = []
+  let cursor = 0
+  for (const match of value.matchAll(REVISION_DELETE)) {
+    const start = match.index ?? 0
+    const end = start + match[0].length
+    // `~~删除线~~` 是 GFM 语法，前后紧贴波浪号的一律不当修订。
+    if (start > 0 && value[start - 1] === '~') continue
+    if (value[end] === '~') continue
+    if (start > cursor) {
+      parts.push({ type: 'text', value: value.slice(cursor, start), position: slicePosition(position, value, cursor, start) })
+    }
+    parts.push({
+      type: 'element',
+      tagName: 'del',
+      properties: { className: ['rev-del'] },
+      children: [{ type: 'text', value: match[1], position: slicePosition(position, value, start + 1, end - 1) }],
+      position: slicePosition(position, value, start, end),
+    })
+    cursor = end
+  }
+  if (!parts.length) return [node]
+  if (cursor < value.length) {
+    parts.push({ type: 'text', value: value.slice(cursor), position: slicePosition(position, value, cursor, value.length) })
+  }
+  return parts
+}
+
+function rehypeRevisions() {
+  return (tree: Root) => {
+    visit(tree, 'element', (node: Element) => {
+      if (node.tagName !== 'ins') return
+      const className = Array.isArray(node.properties?.className) ? node.properties.className.map(String) : []
+      if (className.includes('rev-ins')) return
+      node.properties = { ...node.properties, className: [...className, 'rev-ins'] }
+    })
+    visit(tree, 'text', (node: Text, index, parent) => {
+      if (index === undefined || !parent || isRevisionOpaque(parent)) return
+      const parts = splitRevisionText(node)
+      if (parts.length <= 1) return
+      const children = parent.children as RootContent[]
+      children.splice(index, 1, ...parts)
+      // 跳进刚插入的节点没有意义，直接越过它们继续扫。
+      return index + parts.length
+    })
+  }
+}
+
 const processor = unified()
   .use(remarkParse)
-  .use(remarkGfm)
+  // singleTilde 关掉：单个 `~文字~` 留给修订模式当删除标记，删除线仍然只认 `~~文字~~`。
+  .use(remarkGfm, { singleTilde: false })
   .use(remarkMath)
   .use(remarkFrontmatter)
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(rehypeRaw)
+  .use(rehypeRevisions)
   .use(rehypeSourceMap)
   .use(rehypeSlug)
   .use(rehypeKatex)
