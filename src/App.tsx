@@ -23,6 +23,7 @@ import FormattingToolbar from './components/FormattingToolbar'
 import CommentsPanel from './components/CommentsPanel'
 import SettingsModal from './components/SettingsModal'
 import CommentDialog from './components/CommentDialog'
+import GitHubStar from './components/GitHubStar'
 import {
   addComment,
   applyInlineFormat,
@@ -287,6 +288,7 @@ export default function App() {
           <button className="header-button" onClick={handleExport}><Download size={16} /><span>导出 Markdown</span></button>
           <button className="icon-button" title="打印 / 导出 PDF" onClick={() => window.print()}><Printer size={18} /></button>
           <span className="header-divider" />
+          <GitHubStar />
           <button className="icon-button" title="设置" onClick={() => setModal('settings')}><Settings2 size={19} /></button>
           <button className="user-avatar" title={`${settings.userName} · 本地用户`} onClick={() => setModal('settings')}>{(settings.userName || '匿').slice(0, 1)}</button>
         </div>

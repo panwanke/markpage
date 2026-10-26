@@ -29,6 +29,11 @@ button:disabled { cursor: default; opacity: .35; }
 .header-button { height: 32px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border-radius: 7px; color: #61636e; font-size: 11px; }
 .header-button:hover { background: #f2f1f7; color: var(--accent); }
 .header-divider { height: 20px; width: 1px; background: var(--border); margin: 0 5px; }
+.github-star { height: 30px; padding: 0 9px 0 8px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 7px; color: #4b4d58; font-size: 11px; font-weight: 600; text-decoration: none; transition: border-color .15s, color .15s, background .15s; }
+.github-star:hover { border-color: #cfc8f5; color: var(--accent); background: #f8f6ff; }
+.github-mark { flex: 0 0 auto; }
+.github-star-count { display: inline-flex; align-items: center; gap: 2px; padding: 1px 5px; border-radius: 9px; background: #f2f1f7; color: #7a7684; font-size: 9px; font-weight: 700; }
+.github-star:hover .github-star-count { background: #eeecfa; color: var(--accent); }
 .user-avatar { width: 30px; height: 30px; border-radius: 50%; margin-left: 5px; background: #e9e5fb; color: #6654c8; border: 2px solid #f6f4ff; font-size: 12px; font-weight: 700; }
 .tab-strip { height: 42px; flex: 0 0 42px; display: flex; align-items: stretch; justify-content: space-between; background: #fafafd; border-bottom: 1px solid var(--border); padding-left: 12px; z-index: 25; }
 .tab-scroll { display: flex; align-items: stretch; min-width: 0; overflow-x: auto; scrollbar-width: none; }
@@ -311,6 +316,8 @@ button:disabled { cursor: default; opacity: .35; }
   .app-header { gap: 12px; padding: 0 12px; }
   .header-button span { display: none; }
   .header-button { padding: 0 7px; }
+  .github-star-label, .github-star-count { display: none; }
+  .github-star { padding: 0 7px; }
   .focus-toggle { font-size: 0; }
   .focus-toggle svg { width: 17px; height: 17px; }
   .document-viewport { padding: 22px 18px 60px; }
