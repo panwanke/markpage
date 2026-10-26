@@ -1,6 +1,9 @@
+import type { MessageKey } from '../i18n'
+
 export interface FontOption {
   value: string
-  label: string
+  /** 文案键：字体名随界面语言切换，但字体栈本身不变。 */
+  labelKey: MessageKey
   stack: string
 }
 
@@ -8,27 +11,27 @@ export interface FontOption {
 export const UI_FONTS: FontOption[] = [
   {
     value: 'system',
-    label: '系统默认 · Inter / 苹方 / 雅黑',
+    labelKey: 'font.ui.system',
     stack: 'Inter, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
   },
   {
     value: 'sans',
-    label: '无衬线 · 苹方 / 思源黑体',
+    labelKey: 'font.ui.sans',
     stack: '"PingFang SC", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif',
   },
   {
     value: 'serif',
-    label: '宋体 · 思源宋体 / 宋体',
+    labelKey: 'font.ui.serif',
     stack: '"Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", SimSun, serif',
   },
   {
     value: 'kai',
-    label: '楷体 · 霞鹜文楷 / 楷体',
+    labelKey: 'font.ui.kai',
     stack: '"LXGW WenKai", "Kaiti SC", KaiTi, STKaiti, serif',
   },
   {
     value: 'mono',
-    label: '等宽 · SF Mono / Consolas',
+    labelKey: 'font.ui.mono',
     stack: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
   },
 ]
@@ -37,22 +40,22 @@ export const UI_FONTS: FontOption[] = [
 export const DOC_FONTS: FontOption[] = [
   {
     value: 'serif',
-    label: '宋体系 · 长文阅读（默认）',
+    labelKey: 'font.doc.serif',
     stack: 'Georgia, "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", SimSun, serif',
   },
   {
     value: 'sans',
-    label: '黑体系 · 屏幕阅读',
+    labelKey: 'font.doc.sans',
     stack: 'Inter, "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", sans-serif',
   },
   {
     value: 'kai',
-    label: '楷体系 · 笔记感',
+    labelKey: 'font.doc.kai',
     stack: '"LXGW WenKai", "Kaiti SC", KaiTi, STKaiti, serif',
   },
   {
     value: 'mono',
-    label: '等宽 · 技术稿',
+    labelKey: 'font.doc.mono',
     stack: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
   },
 ]

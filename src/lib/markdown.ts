@@ -27,8 +27,11 @@ export interface OutlineItem {
   depth: number
 }
 
+/** 没有 frontmatter title 时的占位标题；界面层会按当前语言替换显示。 */
+export const UNTITLED_TITLE = '未命名文档'
+
 export const DEFAULT_PAGE_CONFIG: PageConfig = {
-  title: '未命名文档',
+  title: UNTITLED_TITLE,
   header: '',
   footer: '',
   paper: 'A4',
@@ -187,7 +190,7 @@ function cleanReadableText(value: string) {
     .trim()
 }
 
-export function getCommentThreads(markdown: string): CommentThread[] {
+export function getCommentThreads(markdown: string, missingAnchor = '未找到原文锚点'): CommentThread[] {
   const threads: CommentThread[] = []
   for (const match of markdown.matchAll(commentPattern())) {
     const [, id, resolved, block] = match
@@ -209,7 +212,7 @@ export function getCommentThreads(markdown: string): CommentThread[] {
       }
     }
     const quotePattern = new RegExp(`<comment\\s+id=["']${escapeRegExp(id)}["'][^>]*>([\\s\\S]*?)<\\/comment>`, 'i')
-    const quote = quotePattern.exec(markdown)?.[1] ?? '未找到原文锚点'
+    const quote = quotePattern.exec(markdown)?.[1] ?? missingAnchor
     threads.push({ id, quote: cleanReadableText(quote), messages, resolved: resolved === 'resolved' })
   }
   return threads
