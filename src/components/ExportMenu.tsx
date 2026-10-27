@@ -5,6 +5,8 @@ import type { MessageKey } from '../i18n'
 
 interface ExportMenuProps {
   disabled?: boolean
+  /** 当前生效的导出键位，按三档分别传入（已按平台格式化）。 */
+  shortcuts?: { direct?: string; clean?: string; custom?: string }
   onDirect: () => void
   onClean: () => void
   onCustom: () => void
@@ -16,7 +18,7 @@ const ITEMS: { key: 'direct' | 'clean' | 'custom'; icon: typeof Download; title:
   { key: 'custom', icon: SlidersHorizontal, title: 'export.custom', description: 'export.customHint' },
 ]
 
-export default function ExportMenu({ disabled = false, onDirect, onClean, onCustom }: ExportMenuProps) {
+export default function ExportMenu({ disabled = false, shortcuts, onDirect, onClean, onCustom }: ExportMenuProps) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -66,6 +68,7 @@ export default function ExportMenu({ disabled = false, onDirect, onClean, onCust
             >
               <item.icon size={16} />
               <span><strong>{t(item.title)}</strong><small>{t(item.description)}</small></span>
+              {shortcuts?.[item.key] && <kbd className="export-shortcut">{shortcuts[item.key]}</kbd>}
             </button>
           ))}
         </div>

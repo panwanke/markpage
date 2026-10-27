@@ -571,3 +571,55 @@ body.is-resizing-columns .source-editor { pointer-events: none; }
   .paper-page:last-child { break-after: auto; }
   .measure-document { display: none; }
 }
+
+/* ---------- 顶部菜单栏 ---------- */
+.menubar { display: flex; align-items: center; gap: 1px; margin-left: calc(-12px * var(--ui-width)); flex: 0 0 auto; }
+.menubar-item { position: relative; }
+.menubar-trigger { height: 30px; padding: 0 9px; border-radius: 7px; color: #5c5d68; font-size: calc(12px * var(--ui-scale)); white-space: nowrap; }
+.menubar-trigger:hover, .menubar-item.is-open .menubar-trigger { background: #f2f1f7; color: var(--accent); }
+.menubar-dropdown { position: absolute; top: calc(100% + 6px); left: 0; min-width: 236px; padding: 6px; background: white; border: 1px solid #e6e3f0; border-radius: 11px; box-shadow: 0 16px 44px rgba(30,28,48,.16); z-index: 95; animation: menu-in .14s ease-out; }
+.menubar-action { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 9px; border-radius: 7px; color: #4a4b55; font-size: calc(12px * var(--ui-scale)); text-align: left; }
+.menubar-action:hover:not(:disabled), .menubar-action:focus-visible { background: #f6f4fd; color: var(--accent); }
+.menubar-action:disabled { color: #bcbac4; cursor: default; }
+.menubar-action-label { flex: 1; min-width: 0; white-space: nowrap; }
+.menubar-action-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+.menubar-shortcut { flex: 0 0 auto; color: #9a96a3; font-family: ui-monospace, Consolas, monospace; font-size: calc(10px * var(--ui-scale)); letter-spacing: .02em; }
+.menubar-action:disabled .menubar-shortcut { color: #d2d0d9; }
+.menubar-separator { height: 1px; margin: 5px 8px; background: #f0eef5; }
+
+/* ---------- 标签拖动排序 ---------- */
+.document-tab[draggable='true'] { cursor: grab; }
+.document-tab[draggable='true']:active { cursor: grabbing; }
+.document-tab.is-dragging { opacity: .45; }
+.document-tab.drop-before { box-shadow: inset 3px 0 0 var(--accent); }
+.document-tab.drop-after { box-shadow: inset -3px 0 0 var(--accent); }
+
+/* ---------- 导出菜单里的键位提示 ---------- */
+/* 多了一列键位提示，菜单相应加宽，说明文案不会被挤成三行。 */
+.export-dropdown { width: 324px; }
+.export-dropdown button > span:not(.export-shortcut) { flex: 1; min-width: 0; }
+.export-shortcut { margin-left: auto; align-self: center; padding: 1px 5px; border: 1px solid #e6e3f0; border-radius: 5px; background: #faf9fd; color: #98939f; font-family: ui-monospace, Consolas, monospace; font-size: calc(9.5px * var(--ui-scale)); white-space: nowrap; }
+
+/* ---------- 快捷键设置 ---------- */
+.shortcut-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.shortcut-summary-text strong { display: block; font-size: calc(12px * var(--ui-scale)); color: #54515d; }
+.shortcut-summary-text small { display: block; margin-top: 4px; color: #9a96a3; font-size: calc(10.5px * var(--ui-scale)); }
+.shortcut-summary .reset-appearance { margin-top: 0; }
+.shortcut-table { display: flex; flex-direction: column; gap: 2px; }
+.shortcut-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 7px; }
+.shortcut-row:hover { background: #faf9fd; }
+.shortcut-row.is-recording { background: #f4f1fe; }
+.shortcut-label { color: #5b5866; font-size: calc(11.5px * var(--ui-scale)); }
+.shortcut-chip { min-width: 112px; padding: 4px 9px; border: 1px solid #e4e1ee; border-radius: 6px; background: white; color: #55525f; font-family: ui-monospace, Consolas, monospace; font-size: calc(10.5px * var(--ui-scale)); text-align: center; }
+.shortcut-chip:hover { border-color: #c8c0ee; color: var(--accent); }
+.shortcut-chip.is-unassigned { color: #a9a6b3; }
+.shortcut-chip.is-recording { border-color: var(--accent); background: #f1edfd; color: var(--accent); }
+.shortcut-reset { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 5px; color: #a5a2ae; }
+.shortcut-reset:hover:not(:disabled) { background: #f1eff8; color: var(--accent); }
+.shortcut-reset:disabled { opacity: .32; cursor: default; }
+.shortcut-error { grid-column: 1 / -1; color: #b3261e; font-size: calc(10px * var(--ui-scale)); }
+
+/* 窄屏先收起菜单栏：快捷键与设置入口都还在，不会出现「点了没反应」的假控件。 */
+@media (max-width: 1180px) {
+  .menubar { display: none; }
+}

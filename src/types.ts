@@ -1,4 +1,5 @@
 import type { SidebarLayout } from './lib/layout'
+import type { Keymap } from './lib/shortcuts'
 
 export interface MarkdownDocument {
   id: string
@@ -117,5 +118,7 @@ export interface WorkspaceSettings {
   uiScale: number
   /** 正文字体（DOC_FONTS 的 value）。 */
   docFont: string
+  /** 快捷键：命令 id → 键位，未自定义的命令沿用 COMMANDS 里的默认值。 */
+  keymap: Keymap
   exportConfig: ExportConfig
 }

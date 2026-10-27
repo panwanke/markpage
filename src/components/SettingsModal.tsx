@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Braces, Check, FileCog, Languages, LayoutPanelLeft, Palette, Puzzle, RotateCcw, Type, UserRound, X } from 'lucide-react'
+import { Braces, Check, FileCog, Keyboard, Languages, LayoutPanelLeft, Palette, Puzzle, RotateCcw, Type, UserRound, X } from 'lucide-react'
 import { useI18n } from '../i18n'
 import type { MessageKey } from '../i18n'
 import { DOC_FONTS, UI_FONTS, UI_SCALE_MAX, UI_SCALE_MIN } from '../lib/fonts'
 import { useEscape } from '../lib/useEscape'
+import type { Keymap } from '../lib/shortcuts'
 import type { PageConfig } from '../types'
+import ShortcutSettings from './ShortcutSettings'
 
 interface SettingsModalProps {
   config: PageConfig
@@ -13,15 +15,19 @@ interface SettingsModalProps {
   uiFont: string
   uiScale: number
   docFont: string
+  keymap: Keymap
+  /** 打开时停在哪个标签页，帮助菜单的「快捷键…」靠它直接落到快捷键面板。 */
+  initialTab?: SettingsTab
   onUserName: (name: string) => void
   onLocale: (locale: string) => void
   onAppearance: (patch: { uiFont?: string; uiScale?: number; docFont?: string }) => void
+  onKeymap: (keymap: Keymap) => void
   onConfig: (patch: Partial<PageConfig>) => void
   onResetLayout: () => void
   onClose: () => void
 }
 
-type SettingsTab = 'general' | 'appearance' | 'page' | 'language' | 'plugins'
+export type SettingsTab = 'general' | 'appearance' | 'page' | 'shortcuts' | 'language' | 'plugins'
 
 const SCALE_PRESETS: { value: number; labelKey: MessageKey }[] = [
   { value: 1, labelKey: 'settings.scale.compact' },
@@ -43,15 +49,18 @@ export default function SettingsModal({
   uiFont,
   uiScale,
   docFont,
+  keymap,
+  initialTab = 'general',
   onUserName,
   onLocale,
   onAppearance,
+  onKeymap,
   onConfig,
   onResetLayout,
   onClose,
 }: SettingsModalProps) {
   const { t, locales, localeId } = useI18n()
-  const [tab, setTab] = useState<SettingsTab>('general')
+  const [tab, setTab] = useState<SettingsTab>(initialTab)
   useEscape(onClose)
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
@@ -61,6 +70,7 @@ export default function SettingsModal({
           <button className={tab === 'general' ? 'active' : ''} onClick={() => setTab('general')}><UserRound size={17} /> {t('settings.tab.general')}</button>
           <button className={tab === 'appearance' ? 'active' : ''} onClick={() => setTab('appearance')}><Palette size={17} /> {t('settings.tab.appearance')}</button>
           <button className={tab === 'page' ? 'active' : ''} onClick={() => setTab('page')}><FileCog size={17} /> {t('settings.tab.page')}</button>
+          <button className={tab === 'shortcuts' ? 'active' : ''} onClick={() => setTab('shortcuts')}><Keyboard size={17} /> {t('settings.tab.shortcuts')}</button>
           <button className={tab === 'language' ? 'active' : ''} onClick={() => setTab('language')}><Languages size={17} /> {t('settings.tab.language')}</button>
           <button className={tab === 'plugins' ? 'active' : ''} onClick={() => setTab('plugins')}><Puzzle size={17} /> {t('settings.tab.plugins')}</button>
           <div className="settings-version">MARKPAGE<br />VERSION {APP_VERSION}</div>
@@ -152,6 +162,7 @@ export default function SettingsModal({
             </div>
             <div className="frontmatter-hint"><Braces size={16} /><code>header: {config.header || '…'}  ·  footer: {config.footer || '…'}  ·  paper: {config.paper}</code></div>
           </>}
+          {tab === 'shortcuts' && <ShortcutSettings keymap={keymap} onChange={onKeymap} />}
           {tab === 'language' && <>
             <div className="settings-title"><h2>{t('settings.language.title')}</h2><p>{t('settings.language.hint')}</p></div>
             <div className="settings-section">

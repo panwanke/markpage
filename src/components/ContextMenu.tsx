@@ -64,15 +64,25 @@ export default function ContextMenu({ x, y, entries, title, subtitle, onClose }:
     const element = menuRef.current
     if (!element) return
     const { width, height } = element.getBoundingClientRect()
-    setPosition({
+    const next = {
       left: Math.max(EDGE, Math.min(x, window.innerWidth - width - EDGE)),
       top: Math.max(EDGE, Math.min(y, window.innerHeight - height - EDGE)),
-    })
+    }
+    // 位置没变就别换新对象：调用方每次渲染都新建 entries，否则这里会白白多渲一帧。
+    setPosition((current) => (current.left === next.left && current.top === next.top ? current : next))
   }, [x, y, entries])
 
   useEffect(() => {
     // 菜单拿到焦点但不抢焦点到第一个按钮：右键刚选中文字时，焦点环会盖住选区。
-    menuRef.current?.focus({ preventScroll: true })
+    const opener = document.activeElement as HTMLElement | null
+    // 菜单节点抓进局部变量：卸载时 menuRef 可能已经被 React 置空。
+    const menu = menuRef.current
+    menu?.focus({ preventScroll: true })
+    return () => {
+      const active = document.activeElement as HTMLElement | null
+      const orphan = !active || active === document.body || active === menu || Boolean(menu?.contains(active))
+      if (orphan && opener?.isConnected) opener.focus({ preventScroll: true })
+    }
   }, [])
 
   useEffect(() => {

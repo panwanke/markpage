@@ -5,6 +5,7 @@ import { CUSTOM_EXPORT_DEFAULT } from './export'
 import { clampUiScale } from './fonts'
 import { createDefaultLayout, normalizeLayout } from './layout'
 import { getPageConfig, UNTITLED_TITLE } from './markdown'
+import { DEFAULT_KEYMAP, normalizeKeymap } from './shortcuts'
 import type { MarkdownDocument, WorkspaceSettings } from '../types'
 
 const DOCUMENTS_KEY = 'markpage.documents.v1'
@@ -34,6 +35,7 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   uiFont: 'system',
   uiScale: 1.15,
   docFont: 'serif',
+  keymap: { ...DEFAULT_KEYMAP },
   exportConfig: CUSTOM_EXPORT_DEFAULT,
 }
 
@@ -97,6 +99,8 @@ export function loadSettings(): WorkspaceSettings {
       layout,
       uiScale: clampUiScale(merged.uiScale),
       splitRatio: clampSplitRatio(merged.splitRatio),
+      // 老版本没有 keymap 字段：缺项自动落回默认键位，坏掉的写法也一并丢掉。
+      keymap: normalizeKeymap(raw.keymap),
       revisionMode: merged.revisionMode === true,
       editorMode: merged.editorMode === 'source' || merged.editorMode === 'split' ? merged.editorMode : 'rendered',
     }

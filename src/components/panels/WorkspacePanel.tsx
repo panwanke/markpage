@@ -1,15 +1,20 @@
 import { useState } from 'react'
-import { Copy, Download, FilePlus2, FileText, FolderOpen, HardDrive, Pencil, RefreshCw, ShieldCheck, Trash2, X } from 'lucide-react'
-import ContextMenu from '../ContextMenu'
-import type { MenuEntry } from '../ContextMenu'
+import { FilePlus2, FileText, FolderOpen, HardDrive, RefreshCw, ShieldCheck, X } from 'lucide-react'
+import DocumentMenu from '../DocumentMenu'
+import type { DocumentMenuActions } from '../DocumentMenu'
+import { isContextMenuKey } from '../../lib/keys'
 import { useI18n } from '../../i18n'
 import type { MarkdownDocument } from '../../types'
 
 export interface FolderView {
   name: string
   writable: boolean
+  /** 文件数触顶被截断：列表不完整，要在界面上说清楚。 */
+  truncated?: boolean
+  scanning?: boolean
   files: { path: string; title: string }[]
 }
+
 
 interface WorkspacePanelProps {
   documents: MarkdownDocument[]
@@ -29,6 +34,11 @@ interface WorkspacePanelProps {
   onDisconnectFolder: () => void
   onPermitWrite: () => void
   onOpenLocalFile: (path: string) => void
+  /** 磁盘类操作：另存 / 解除绑定 / 重新载入 / 复制路径。 */
+  onSaveToDisk: (id: string) => void
+  onUnbind: (id: string) => void
+  onReload: (id: string) => void
+  onCopyPath: (id: string) => void
 }
 
 interface MenuState {
@@ -54,6 +64,10 @@ export default function WorkspacePanel({
   onDisconnectFolder,
   onPermitWrite,
   onOpenLocalFile,
+  onSaveToDisk,
+  onUnbind,
+  onReload,
+  onCopyPath,
 }: WorkspacePanelProps) {
   const { t, localeId } = useI18n()
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -74,16 +88,21 @@ export default function WorkspacePanel({
   }
 
   const target = menu ? documents.find((document) => document.id === menu.id) : undefined
-  const entries: MenuEntry[] = target ? [
-    { id: 'open', label: t('workspace.open'), icon: <FolderOpen size={15} />, onSelect: () => onOpen(target.id) },
-    { id: 'rename', label: t('workspace.rename'), icon: <Pencil size={15} />, onSelect: () => startRename(target) },
-    { id: 'duplicate', label: t('workspace.duplicate'), icon: <Copy size={15} />, onSelect: () => onDuplicate(target.id) },
-    { id: 'export', label: t('workspace.export'), icon: <Download size={15} />, onSelect: () => onExport(target.id) },
-    { kind: 'separator', id: 'sep-close' },
-    { id: 'close', label: t('workspace.close'), icon: <X size={15} />, disabled: !target.open, onSelect: () => onClose(target.id) },
-    { kind: 'separator', id: 'sep-delete' },
-    { id: 'delete', label: t('workspace.delete'), icon: <Trash2 size={15} />, danger: true, onSelect: () => onDelete(target.id) },
-  ] : []
+  const menuActions: DocumentMenuActions = {
+    onOpen,
+    onRename: (id) => {
+      const document = documents.find((item) => item.id === id)
+      if (document) startRename(document)
+    },
+    onDuplicate,
+    onExport,
+    onClose,
+    onDelete,
+    onSaveToDisk,
+    onUnbind,
+    onReload,
+    onCopyPath,
+  }
 
   return (
     <div className="panel-scroll">
@@ -108,6 +127,7 @@ export default function WorkspacePanel({
               <ShieldCheck size={13} />{t('localfs.permit')}
             </button>
           )}
+          {folder.scanning && <p className="local-file-empty">{t('localfs.scanning')}</p>}
           {folder.files.length ? (
             <div className="local-file-list">
               {folder.files.map((file) => (
@@ -123,7 +143,10 @@ export default function WorkspacePanel({
               ))}
             </div>
           ) : (
-            <p className="local-file-empty">{t('localfs.empty')}</p>
+            !folder.scanning && <p className="local-file-empty">{t('localfs.empty')}</p>
+          )}
+          {folder.truncated && !folder.scanning && (
+            <p className="local-file-empty">{t('localfs.truncated', { count: folder.files.length })}</p>
           )}
         </div>
       )}
@@ -145,6 +168,11 @@ export default function WorkspacePanel({
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault()
                   onOpen(document.id)
+                } else if (isContextMenuKey(event)) {
+                  // 键盘用户也要够得着右键菜单：菜单位置取条目左下角。
+                  event.preventDefault()
+                  const rect = event.currentTarget.getBoundingClientRect()
+                  setMenu({ id: document.id, x: rect.left + 12, y: rect.bottom - 4 })
                 }
               }}
               onContextMenu={(event) => {
@@ -192,12 +220,12 @@ export default function WorkspacePanel({
       </div>
 
       {menu && target && (
-        <ContextMenu
+        <DocumentMenu
           x={menu.x}
           y={menu.y}
-          title={t('workspace.menu')}
-          subtitle={target.name.trim() || t('document.untitled')}
-          entries={entries}
+          document={target}
+          folderConnected={Boolean(folder)}
+          actions={menuActions}
           onClose={() => setMenu(null)}
         />
       )}

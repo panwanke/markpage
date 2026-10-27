@@ -14,6 +14,18 @@ const SKIP_DIRECTORIES = new Set(['node_modules', '.git', '.obsidian', '.trash',
 
 export const MAX_SCAN_DEPTH = 4
 
+/**
+ * 一次最多收多少个文件。Obsidian 仓库动辄几千篇，全量遍历 + 全量渲染会把界面卡死，
+ * 到上限就停（并如实告诉用户列表被截断），总比转圈半天强。
+ */
+export const MAX_SCAN_FILES = 2000
+
+export interface ScanResult {
+  entries: LocalFileEntry[]
+  /** 命中 MAX_SCAN_FILES 被截断：列表不完整，界面必须提示。 */
+  truncated: boolean
+}
+
 export interface LocalFileEntry {
   /** 相对根目录的路径，既是文档的稳定标识，也是列表里的分组依据。 */
   path: string
@@ -87,12 +99,21 @@ function joinPath(parent: string, name: string) {
   return parent ? `${parent}/${name}` : name
 }
 
-/** 递归扫描目录，最多 MAX_SCAN_DEPTH 层，跳过依赖与版本库目录。 */
-export async function scanDirectory(root: FileSystemDirectoryHandle): Promise<LocalFileEntry[]> {
+/** 递归扫描目录，最多 MAX_SCAN_DEPTH 层、MAX_SCAN_FILES 个文件，跳过依赖与版本库目录。 */
+export async function scanDirectory(
+  root: FileSystemDirectoryHandle,
+  limit = MAX_SCAN_FILES,
+): Promise<ScanResult> {
   const entries: LocalFileEntry[] = []
+  // 布尔值放在闭包外，遍历一旦触顶就能让所有层级同时收手。
+  let truncated = false
 
   async function walk(handle: FileSystemDirectoryHandle, prefix: string, depth: number) {
     for await (const child of handle.values()) {
+      if (entries.length >= limit) {
+        truncated = true
+        return
+      }
       if (child.kind === 'file') {
         const path = joinPath(prefix, child.name)
         if (!isMarkdownPath(path)) continue
@@ -106,7 +127,7 @@ export async function scanDirectory(root: FileSystemDirectoryHandle): Promise<Lo
   }
 
   await walk(root, '', 1)
-  return entries.sort((a, b) => comparePaths(a.path, b.path))
+  return { entries: entries.sort((a, b) => comparePaths(a.path, b.path)), truncated }
 }
 
 export async function readLocalFile(handle: FileSystemFileHandle) {
@@ -118,6 +139,87 @@ export async function writeLocalFile(handle: FileSystemFileHandle, content: stri
   const writable = await handle.createWritable()
   await writable.write(content)
   await writable.close()
+}
+
+/** 单个文件句柄的写权限：拖进来的文件不在任何已扫描的目录里，得单独确认一次。 */
+export async function ensureFileWritePermission(handle: FileSystemFileHandle): Promise<boolean> {
+  const target = handle as unknown as PermissionCapable
+  try {
+    if ((await target.queryPermission?.({ mode: 'readwrite' })) === 'granted') return true
+    return (await target.requestPermission?.({ mode: 'readwrite' })) === 'granted'
+  } catch {
+    return false
+  }
+}
+
+/** 文件名里的分隔符与 Windows 保留字符一律换成连字符，空名回落成「未命名」。 */
+export function sanitizeFileName(name: string, fallback = 'document') {
+  const cleaned = name
+    .replace(MARKDOWN_EXTENSION, '')
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return (cleaned || fallback) + '.md'
+}
+
+/**
+ * 在已连接的目录里新建一个文件（必要时顺带建出中间目录），写完返回句柄。
+ * 「另存到磁盘」走这条路：文档就此绑定，后续改动自动写回。
+ */
+export async function createLocalFile(
+  root: FileSystemDirectoryHandle,
+  relativePath: string,
+  content: string,
+): Promise<FileSystemFileHandle> {
+  const segments = relativePath.split('/').filter(Boolean)
+  const fileName = segments.pop() ?? 'document.md'
+  let directory = root
+  for (const segment of segments) {
+    directory = await directory.getDirectoryHandle(segment, { create: true })
+  }
+  const handle = await directory.getFileHandle(fileName, { create: true })
+  await writeLocalFile(handle, content)
+  return handle
+}
+
+interface TransferItemWithHandle {
+  kind: string
+  getAsFileSystemHandle?: () => Promise<FileSystemDirectoryHandle | FileSystemFileHandle | null>
+}
+
+export interface DroppedHandles {
+  /** 拖进来的文件句柄：拿得到就能绑定磁盘，不必先连整个目录。 */
+  files: { name: string; handle: FileSystemFileHandle }[]
+  /** 拖进来的是目录时，直接当工作目录连上（只认第一个）。 */
+  directory: FileSystemDirectoryHandle | null
+}
+
+/**
+ * 从 drop 事件里尽量取回真实句柄。
+ * `getAsFileSystemHandle()` 只有 Chromium 有，取不到就返回空集合 —— 调用方退回「拷贝进浏览器」。
+ */
+export async function handlesFromTransfer(items: DataTransferItemList | null): Promise<DroppedHandles> {
+  const result: DroppedHandles = { files: [], directory: null }
+  if (!items || typeof (items as unknown as { length?: number }).length !== 'number') return result
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index] as unknown as TransferItemWithHandle
+    if (item?.kind !== 'file' || typeof item.getAsFileSystemHandle !== 'function') continue
+    let handle: FileSystemDirectoryHandle | FileSystemFileHandle | null = null
+    try {
+      handle = await item.getAsFileSystemHandle()
+    } catch {
+      handle = null
+    }
+    if (!handle) continue
+    if (handle.kind === 'directory') {
+      result.directory ??= handle as FileSystemDirectoryHandle
+      continue
+    }
+    const file = handle as FileSystemFileHandle
+    if (!isMarkdownPath(file.name)) continue
+    result.files.push({ name: file.name, handle: file })
+  }
+  return result
 }
 
 /* ------------------------------------------------------------------ *

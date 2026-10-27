@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { comparePaths, isMarkdownPath, MAX_SCAN_DEPTH, scanDirectory, titleFromPath } from './localfs'
+import {
+  comparePaths,
+  isMarkdownPath,
+  MAX_SCAN_DEPTH,
+  MAX_SCAN_FILES,
+  scanDirectory,
+  titleFromPath,
+} from './localfs'
 
 interface FakeFile {
   kind: 'file'
@@ -32,9 +39,9 @@ function toHandle(node: FakeTree): never {
   } as never
 }
 
-async function scan(tree: FakeDirectory) {
-  const entries = await scanDirectory(toHandle(tree) as unknown as FileSystemDirectoryHandle)
-  return entries.map((entry) => entry.path)
+async function scan(tree: FakeDirectory, limit?: number) {
+  const result = await scanDirectory(toHandle(tree) as unknown as FileSystemDirectoryHandle, limit)
+  return { paths: result.entries.map((entry) => entry.path), truncated: result.truncated }
 }
 
 describe('文件路径判定', () => {
@@ -59,7 +66,7 @@ describe('文件路径判定', () => {
 
 describe('目录扫描', () => {
   it('递归收集 Markdown，并跳过依赖与隐藏目录', async () => {
-    const paths = await scan(directory('root', [
+    const { paths, truncated } = await scan(directory('root', [
       file('README.md'),
       file('cover.png'),
       directory('notes', [file('a.md'), file('b.markdown')]),
@@ -68,16 +75,31 @@ describe('目录扫描', () => {
     ]))
     // 按路径排序（不区分大小写）：notes/… 排在 README.md 前面。
     expect(paths).toEqual(['notes/a.md', 'notes/b.markdown', 'README.md'])
+    expect(truncated).toBe(false)
   })
 
   it('超过深度上限的目录不再展开', async () => {
     let tree: FakeDirectory = directory('leaf', [file('deep.md')])
     for (let index = 0; index < MAX_SCAN_DEPTH; index += 1) tree = directory(`d${index}`, [tree])
     // 根目录算第 1 层，所以最深处那个 leaf 已经超出上限。
-    expect(await scan(tree)).toEqual([])
+    expect((await scan(tree)).paths).toEqual([])
   })
 
   it('空目录返回空列表而不是报错', async () => {
-    expect(await scan(directory('empty', []))).toEqual([])
+    expect((await scan(directory('empty', []))).paths).toEqual([])
+  })
+
+  it('文件数到上限就停下，并如实标记被截断', async () => {
+    const many = Array.from({ length: 6 }, (_, index) => file(`n${index}.md`))
+    const { paths, truncated } = await scan(directory('root', many), 4)
+    expect(paths).toHaveLength(4)
+    expect(truncated).toBe(true)
+  })
+
+  it('没到上限时不会误报截断', async () => {
+    const many = Array.from({ length: 3 }, (_, index) => file(`n${index}.md`))
+    const { paths, truncated } = await scan(directory('root', many), MAX_SCAN_FILES)
+    expect(paths).toHaveLength(3)
+    expect(truncated).toBe(false)
   })
 })

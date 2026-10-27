@@ -11,18 +11,20 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
-  Plus,
   Printer,
   ScrollText,
   Settings2,
   Upload,
-  X,
 } from 'lucide-react'
 import MarkdownDocument from './components/MarkdownDocument'
 import FormattingToolbar from './components/FormattingToolbar'
 import type { RevisionControls } from './components/FormattingToolbar'
 import CommentsPanel from './components/CommentsPanel'
 import SettingsModal from './components/SettingsModal'
+import type { SettingsTab } from './components/SettingsModal'
+import MenuBar from './components/MenuBar'
+import type { MenuBarMenu } from './components/MenuBar'
+import TabStrip from './components/TabStrip'
 import CommentDialog from './components/CommentDialog'
 import RevisionDialog from './components/RevisionDialog'
 import RevisionPopover from './components/RevisionPopover'
@@ -33,6 +35,8 @@ import ExportDialog from './components/ExportDialog'
 import SelectionMenu from './components/SelectionMenu'
 import DockSidebar from './components/DockSidebar'
 import type { PanelDescriptor } from './components/DockSidebar'
+import DocumentMenu from './components/DocumentMenu'
+import type { DocumentMenuActions } from './components/DocumentMenu'
 import ExamplesPanel from './components/panels/ExamplesPanel'
 import WorkspacePanel from './components/panels/WorkspacePanel'
 import OutlinePanel from './components/panels/OutlinePanel'
@@ -78,20 +82,40 @@ import {
 import { createDefaultLayout, toggleSidebar } from './lib/layout'
 import {
   clearFolderHandle,
+  createLocalFile,
+  ensureFileWritePermission,
+  handlesFromTransfer,
   hasWritePermission,
   loadFolderHandle,
   pickDirectory,
   readLocalFile,
   requestWritePermission,
+  sanitizeFileName,
   saveFolderHandle,
   scanDirectory,
   supportsDirectoryPicker,
+  titleFromPath,
   writeLocalFile,
 } from './lib/localfs'
 import { MARKDOWN_EXTENSION as OPENABLE_EXTENSION, type LocalFileEntry } from './lib/localfs'
 import { PluginRegistry } from './plugins/registry'
 import { focusModePlugin } from './plugins/registry'
 import { useI18n } from './i18n'
+import {
+  ALLOWED_WHILE_TYPING,
+  COMMANDS,
+  MENU_GROUPS,
+  bindingIndex,
+  detectPlatform,
+  eventToBinding,
+  formatBinding,
+  isShortcutCapturing,
+  isTextEntryTarget,
+} from './lib/shortcuts'
+import type { CommandId } from './lib/shortcuts'
+import { createHistory, pushHistory, redoHistory, undoHistory } from './lib/history'
+import type { DocumentHistory } from './lib/history'
+import { moveTab, reorderOpenDocuments, shiftTab } from './lib/tabs'
 import type {
   EditorMode,
   InlineFormat,
@@ -119,12 +143,23 @@ export default function App() {
   const [activePage, setActivePage] = useState(1)
   const [toolbarLeft, setToolbarLeft] = useState(0)
   const [splitRatio, setSplitRatio] = useState(settings.splitRatio)
-  const [folder, setFolder] = useState<{ name: string; files: LocalFileEntry[]; writable: boolean } | null>(null)
+  const [folder, setFolder] = useState<{ name: string; files: LocalFileEntry[]; writable: boolean; truncated: boolean } | null>(null)
+  const [folderScanning, setFolderScanning] = useState(false)
   const [dropActive, setDropActive] = useState(false)
+  /** 标签页右键菜单：与工作区列表共用同一份文档菜单，只是触发位置不同。 */
+  const [tabMenu, setTabMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
+  /** 每篇文档各持一份撤销栈，只在内存里；刷新页面即视为新会话。 */
+  const historyRef = useRef(new Map<string, DocumentHistory>())
   const fileInputRef = useRef<HTMLInputElement>(null)
   const floatingToolbarRef = useRef<HTMLDivElement>(null)
   const splitDragRef = useRef<{ x: number; ratio: number; width: number } | null>(null)
   const folderHandleRef = useRef<FileSystemDirectoryHandle | null>(null)
+  /** 拖进来的单个文件句柄：它们不属于任何已扫描的目录，写回时单独查这张表。 */
+  const extraHandlesRef = useRef(new Map<string, FileSystemFileHandle>())
+  /** 拖放监听只挂一次，异步里要拿最新的文档列表，闭包里的那份会过期。 */
+  const documentsRef = useRef(documents)
+  useEffect(() => { documentsRef.current = documents }, [documents])
   /** 磁盘上该文件当前的内容：内容一致就不再写盘，避免每次渲染都触发写入。 */
   const localContentRef = useRef(new Map<string, string>())
   const localTimerRef = useRef(new Map<string, number>())
@@ -154,6 +189,11 @@ export default function App() {
   const revisions = useMemo(() => countRevisions(markdown), [markdown])
   const layout = settings.layout
   const mode = settings.editorMode
+  const keymap = settings.keymap
+  // 平台只探测一次：菜单栏与设置面板显示的键位符号要一致。
+  const platform = useMemo(() => detectPlatform(), [])
+  const shortcutLabel = useCallback((id: CommandId) => formatBinding(keymap[id] ?? '', platform), [keymap, platform])
+  const keyIndex = useMemo(() => bindingIndex(keymap), [keymap])
 
   useEffect(() => {
     if (activeDocument && activeId !== activeDocument.id) setActiveId(activeDocument.id)
@@ -237,13 +277,14 @@ export default function App() {
       if (!handle || cancelled) return
       try {
         const writable = await hasWritePermission(handle)
-        const files = await scanDirectory(handle)
+        const { entries, truncated } = await scanDirectory(handle)
         if (cancelled) return
         folderHandleRef.current = handle
-        setFolder({ name: handle.name, files, writable })
+        setFolder({ name: handle.name, files: entries, writable, truncated })
         if (!writable) notify(t('localfs.needPermission', { name: handle.name }))
       } catch {
         // 目录被删掉或权限被撤销：静默放弃，用户点「打开文件夹」重新选即可。
+        await clearFolderHandle()
       }
     }
     void restore()
@@ -254,7 +295,10 @@ export default function App() {
 
   // 绑定到磁盘的文档改动后写回原文件；600ms 防抖让连续输入只落一次盘。
   useEffect(() => {
-    const handles = new Map((folder?.files ?? []).map((file) => [file.path, file.handle]))
+    const handles = new Map<string, FileSystemFileHandle>([
+      ...(folder?.files ?? []).map((file) => [file.path, file.handle] as const),
+      ...extraHandlesRef.current,
+    ])
     documents.forEach((document) => {
       const path = document.localPath
       if (!path) return
@@ -277,6 +321,12 @@ export default function App() {
     })
   }, [documents, folder?.files, notify, t])
 
+  // 卸载时取消挂起的写盘定时器：界面都要没了，再落盘只会写进一个没人跟踪的文件。
+  useEffect(() => () => {
+    localTimerRef.current.forEach((timer) => window.clearTimeout(timer))
+    localTimerRef.current.clear()
+  }, [])
+
   // 浮动工具条按实测宽度收进视口：界面字号放大后它也会变宽，写死的边距会溢出屏幕。
   useLayoutEffect(() => {
     if (!selection) return
@@ -285,16 +335,59 @@ export default function App() {
     setToolbarLeft(Math.min(window.innerWidth - margin, Math.max(margin, selection.left)))
   }, [selection])
 
-  const updateActiveDocument = useCallback((nextMarkdown: string, name?: string) => {
+  /**
+   * 所有正文改动的唯一出口。history 默认开：把「改之前的全文」压进这篇文档的撤销栈；
+   * 撤销 / 重做本身要关掉它，否则会把自己记成一次新编辑。
+   */
+  const writeActiveMarkdown = useCallback((nextMarkdown: string, options: { name?: string; history?: boolean } = {}) => {
     const id = activeDocument?.id
     if (!id) return
+    if (options.history !== false && nextMarkdown !== markdown) {
+      historyRef.current.set(id, pushHistory(historyRef.current.get(id) ?? createHistory(), markdown, Date.now()))
+    }
     setDocuments((current) => current.map((document) => document.id === id ? {
       ...document,
       markdown: nextMarkdown,
-      name: name ?? document.name,
+      name: options.name ?? document.name,
       updatedAt: new Date().toISOString(),
     } : document))
-  }, [activeDocument?.id])
+  }, [activeDocument?.id, markdown])
+
+  const updateActiveDocument = useCallback((nextMarkdown: string, name?: string) => {
+    writeActiveMarkdown(nextMarkdown, { name })
+  }, [writeActiveMarkdown])
+
+  function undoDocument() {
+    const id = activeDocument?.id
+    if (!id) return
+    const step = undoHistory(historyRef.current.get(id) ?? createHistory(), markdown)
+    if (!step) {
+      notify(t('toast.nothingToUndo'))
+      return
+    }
+    historyRef.current.set(id, step.history)
+    writeActiveMarkdown(step.markdown, { history: false })
+    setSelection(null)
+    setSelectionMenu(null)
+    window.getSelection()?.removeAllRanges()
+    notify(t('toast.undone'))
+  }
+
+  function redoDocument() {
+    const id = activeDocument?.id
+    if (!id) return
+    const step = redoHistory(historyRef.current.get(id) ?? createHistory(), markdown)
+    if (!step) {
+      notify(t('toast.nothingToRedo'))
+      return
+    }
+    historyRef.current.set(id, step.history)
+    writeActiveMarkdown(step.markdown, { history: false })
+    setSelection(null)
+    setSelectionMenu(null)
+    window.getSelection()?.removeAllRanges()
+    notify(t('toast.redone'))
+  }
 
   const handlePageCount = useCallback((count: number) => {
     setPageCount(count)
@@ -332,6 +425,8 @@ export default function App() {
   function closeSelectionMenu() {
     setSelectionMenu(null)
     setSelection(null)
+    // 右键命中高亮时是代码造出来的选区，菜单收起后不该留在正文上。
+    window.getSelection()?.removeAllRanges()
   }
 
   function switchMode(next: EditorMode) {
@@ -457,23 +552,6 @@ export default function App() {
     notify(t('toast.customExported'))
   }, [activeDocument, notify, t])
 
-  useEffect(() => {
-    const handleKeyboard = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) return
-      if (event.key.toLowerCase() === 's') {
-        event.preventDefault()
-        handleExport()
-        notify(t('toast.markdownExported'))
-      }
-      if (event.key.toLowerCase() === 'b' && selection) {
-        event.preventDefault()
-        handleFormat('bold')
-      }
-    }
-    window.addEventListener('keydown', handleKeyboard)
-    return () => window.removeEventListener('keydown', handleKeyboard)
-  }, [selection, handleFormat, handleExport, notify, t])
-
   function updateSettings(patch: Partial<typeof settings>) {
     setSettings((current) => ({ ...current, ...patch }))
   }
@@ -526,6 +604,7 @@ export default function App() {
     if (!target) return
     const name = displayName(target)
     if (!window.confirm(t('workspace.deleteConfirm', { name }))) return
+    historyRef.current.delete(id)
     const remaining = documents.filter((document) => document.id !== id)
     if (!remaining.length) {
       const fallback = createDocument()
@@ -578,6 +657,78 @@ export default function App() {
     notify(t('toast.markdownExported'))
   }
 
+  /**
+   * 另存到磁盘：写进已连接的文件夹并绑定，之后改动自动写回。
+   * 已经绑过的文档直接用原路径覆盖，不另起一份。
+   */
+  async function saveDocumentToDisk(id: string) {
+    const target = documents.find((document) => document.id === id)
+    const root = folderHandleRef.current
+    if (!target) return
+    if (!root) {
+      notify(t('localfs.noFolder'))
+      return
+    }
+    const path = target.localPath ?? sanitizeFileName(displayName(target))
+    try {
+      const handle = await createLocalFile(root, path, target.markdown)
+      // 扫描回来之前先自己拿着句柄，否则这 600ms 内的改动无处可写。
+      extraHandlesRef.current.set(path, handle)
+      localContentRef.current.set(path, target.markdown)
+      setDocuments((current) => current.map((document) => (
+        document.id === id ? { ...document, localPath: path, updatedAt: new Date().toISOString() } : document
+      )))
+      await refreshFolder()
+      notify(t('localfs.savedToDisk', { name: path }))
+    } catch {
+      notify(t('localfs.saveFailed'))
+    }
+  }
+
+  /** 解除绑定：文档留在浏览器里，改动不再写回磁盘。 */
+  function unbindDocument(id: string) {
+    setDocuments((current) => current.map((document) => {
+      if (document.id !== id) return document
+      const { localPath, ...rest } = document
+      if (localPath) {
+        localContentRef.current.delete(localPath)
+        extraHandlesRef.current.delete(localPath)
+      }
+      return rest
+    }))
+    notify(t('localfs.unbound'))
+  }
+
+  /** 从磁盘重新载入：外部编辑器改过文件时用它对齐，浏览器里的改动会被覆盖。 */
+  async function reloadDocument(id: string) {
+    const target = documents.find((document) => document.id === id)
+    const path = target?.localPath
+    if (!target || !path) return
+    const handle = extraHandlesRef.current.get(path) ?? folder?.files.find((file) => file.path === path)?.handle
+    if (!handle) return
+    let content: string
+    try {
+      content = await readLocalFile(handle)
+    } catch {
+      notify(t('localfs.readFailed', { name: path }))
+      return
+    }
+    localContentRef.current.set(path, content)
+    historyRef.current.delete(id)
+    setDocuments((current) => current.map((document) => (
+      document.id === id ? { ...document, markdown: content, updatedAt: new Date().toISOString() } : document
+    )))
+    notify(t('localfs.reloaded', { name: displayName(target) }))
+  }
+
+  function copyDocumentPath(id: string) {
+    const path = documents.find((document) => document.id === id)?.localPath
+    if (!path) return
+    navigator.clipboard.writeText(path)
+      .then(() => notify(t('localfs.copiedPath', { path })))
+      .catch(() => notify(t('toast.copyFailed')))
+  }
+
   /** 「导入」与拖拽共用：只收 Markdown / 纯文本，其余文件给一句提示而不是静默吞掉。 */
   const importFiles = useCallback(async (files: FileList | File[] | null) => {
     const list = Array.from(files ?? [])
@@ -624,7 +775,21 @@ export default function App() {
       event.preventDefault()
       dragDepthRef.current = 0
       setDropActive(false)
-      void importFiles(event.dataTransfer?.files ?? null)
+      // dataTransfer 在 await 之后会被清空，所以先把兜底用的 File 列表抓在手上。
+      const fallbackFiles = event.dataTransfer?.files ?? null
+      void (async () => {
+        const dropped = await handlesFromTransfer(event.dataTransfer?.items ?? null)
+        // 拖进来的是目录：直接当工作目录连上，比点按钮更自然。
+        if (dropped.directory) {
+          await connectFolder(dropped.directory)
+          return
+        }
+        if (dropped.files.length) {
+          await openDroppedFiles(dropped.files)
+          return
+        }
+        await importFiles(fallbackFiles)
+      })()
     }
     window.addEventListener('dragenter', handleDragEnter)
     window.addEventListener('dragover', handleDragOver)
@@ -636,37 +801,114 @@ export default function App() {
       window.removeEventListener('dragleave', handleDragLeave)
       window.removeEventListener('drop', handleDrop)
     }
+    // 拖放监听只挂一次：openDroppedFiles / connectFolder 每次渲染都是新函数，
+    // 跟着重挂会在拖动过程中反复解绑。它们需要的文档列表走 documentsRef 拿最新值。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [importFiles])
 
-  /** 选一个本地文件夹：内容直接来自磁盘，改动写回原文件。 */
-  async function connectFolder() {
+  /** 拖进来的单个文件：拿得到句柄就绑成磁盘文档，改动直接写回原文件。 */
+  async function openDroppedFiles(entries: { name: string; handle: FileSystemFileHandle }[]) {
+    const opened: MarkdownDoc[] = []
+    for (const entry of entries) {
+      const path = entry.name
+      let content: string
+      try {
+        content = await readLocalFile(entry.handle)
+      } catch {
+        notify(t('localfs.readFailed', { name: path }))
+        continue
+      }
+      extraHandlesRef.current.set(path, entry.handle)
+      localContentRef.current.set(path, content)
+      const existing = documentsRef.current.find((document) => document.localPath === path)
+      if (existing) {
+        // 之前拖过同一个文件：以磁盘上的内容为准，旧的撤销栈不再有意义。
+        historyRef.current.delete(existing.id)
+        setDocuments((current) => current.map((document) => document.id === existing.id
+          ? { ...document, markdown: content, open: true, updatedAt: new Date().toISOString() }
+          : document))
+        setActiveId(existing.id)
+        continue
+      }
+      opened.push({ ...createDocument(content, titleFromPath(path)), localPath: path })
+    }
+    if (!opened.length) {
+      if (entries.length === 1) notify(t('localfs.dropBound', { name: entries[0].name }))
+      return
+    }
+    setDocuments((current) => [...current, ...opened])
+    setActiveId(opened[opened.length - 1].id)
+    setSelection(null)
+    setSelectionMenu(null)
+    // 写权限要用户点一下：拖放属于用户手势，此刻申请最自然，失败也不影响读。
+    void ensureFileWritePermission(entries[entries.length - 1].handle)
+    notify(opened.length === 1
+      ? t('localfs.dropBound', { name: opened[0].localPath ?? '' })
+      : t('toast.imported', { count: opened.length }))
+  }
+
+  /**
+   * 选一个本地文件夹：内容直接来自磁盘，改动写回原文件。
+   * 扫描会读整个目录树，出错时（目录被移走 / 权限撤销）不留半连接状态。
+   */
+  async function connectFolder(preset?: FileSystemDirectoryHandle | null) {
     if (!supportsDirectoryPicker()) {
       notify(t('localfs.unsupported'))
       return
     }
-    const handle = await pickDirectory()
+    const handle = preset ?? await pickDirectory()
     if (!handle) return
-    folderHandleRef.current = handle
-    await saveFolderHandle(handle)
-    const writable = await requestWritePermission(handle)
-    const files = await scanDirectory(handle)
-    setFolder({ name: handle.name, files, writable })
-    notify(t('localfs.connected', { name: handle.name, count: files.length }))
+    setFolderScanning(true)
+    try {
+      folderHandleRef.current = handle
+      await saveFolderHandle(handle)
+      const writable = await requestWritePermission(handle)
+      const { entries, truncated } = await scanDirectory(handle)
+      setFolder({ name: handle.name, files: entries, writable, truncated })
+      notify(truncated
+        ? t('localfs.truncated', { count: entries.length })
+        : t('localfs.connected', { name: handle.name, count: entries.length }))
+    } catch {
+      folderHandleRef.current = null
+      setFolder(null)
+      await clearFolderHandle()
+      notify(t('localfs.scanFailed', { name: handle.name }))
+    } finally {
+      setFolderScanning(false)
+    }
   }
 
   async function refreshFolder() {
     const handle = folderHandleRef.current
     if (!handle) return
-    const files = await scanDirectory(handle)
-    setFolder((current) => (current ? { ...current, files } : current))
-    notify(t('localfs.refreshed', { count: files.length }))
+    setFolderScanning(true)
+    try {
+      const { entries, truncated } = await scanDirectory(handle)
+      setFolder((current) => (current ? { ...current, files: entries, truncated } : current))
+      notify(truncated
+        ? t('localfs.truncated', { count: entries.length })
+        : t('localfs.refreshed', { count: entries.length }))
+    } catch {
+      notify(t('localfs.scanFailed', { name: handle.name }))
+    } finally {
+      setFolderScanning(false)
+    }
   }
 
   async function disconnectFolder() {
+    // 挂起的写盘定时器一律取消：断开之后再落盘只会写进一个已经不属于我们的文件。
+    localTimerRef.current.forEach((timer) => window.clearTimeout(timer))
+    localTimerRef.current.clear()
     folderHandleRef.current = null
     localContentRef.current.clear()
     await clearFolderHandle()
     setFolder(null)
+    // 属于这个文件夹的绑定关系一并解除；拖进来的单个文件不受影响。
+    setDocuments((current) => current.map((document) => {
+      if (!document.localPath || extraHandlesRef.current.has(document.localPath)) return document
+      const { localPath: _dropped, ...rest } = document
+      return rest
+    }))
     notify(t('localfs.disconnected'))
   }
 
@@ -696,6 +938,8 @@ export default function App() {
     localContentRef.current.set(path, content)
     if (existing) {
       // 之前开过后来关掉了：以磁盘上的最新内容为准，而不是浏览器里的旧副本。
+      // 内容被整篇换掉，旧的撤销栈已经没有意义了。
+      historyRef.current.delete(existing.id)
       setDocuments((current) => current.map((document) => document.id === existing.id
         ? { ...document, markdown: content, open: true, updatedAt: new Date().toISOString() }
         : document))
@@ -739,6 +983,181 @@ export default function App() {
     document.getElementById(`doc-page-${next}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  // ---------- 命令层：菜单栏、快捷键、设置面板都走这里 ----------
+
+  /** 删除选区：修订模式下记成删除修订，否则直接从源码里抹掉。 */
+  function deleteSelection() {
+    if (!selection) return
+    if (settings.revisionMode) {
+      handleMarkDelete()
+      return
+    }
+    if (!ensureRevivable(selection.start, selection.end)) return
+    const next = markdown.slice(0, selection.start) + markdown.slice(selection.end)
+    if (next === markdown) return
+    writeActiveMarkdown(next)
+    window.getSelection()?.removeAllRanges()
+    setSelection(null)
+    setSelectionMenu(null)
+    notify(t('toast.deletionApplied'))
+  }
+
+  function cycleTab(step: number) {
+    if (!activeDocument || openDocuments.length < 2) return
+    const index = openDocuments.findIndex((document) => document.id === activeDocument.id)
+    if (index < 0) return
+    const next = openDocuments[(index + step + openDocuments.length) % openDocuments.length]
+    openDocument(next.id)
+  }
+
+  function reorderTabs(id: string, targetId: string, position: 'before' | 'after') {
+    setDocuments((current) => reorderOpenDocuments(
+      current,
+      moveTab(current.filter((document) => document.open).map((document) => document.id), id, targetId, position),
+    ))
+  }
+
+  function shiftTabOrder(id: string, step: number) {
+    setDocuments((current) => reorderOpenDocuments(
+      current,
+      shiftTab(current.filter((document) => document.open).map((document) => document.id), id, step),
+    ))
+  }
+
+  function toggleRevisionMode() {
+    const next = !settings.revisionMode
+    updateSettings({ revisionMode: next })
+    notify(t(next ? 'toast.revisionOn' : 'toast.revisionOff'))
+  }
+
+  /** 命令能不能点：菜单置灰与快捷键是否拦截共用同一套判断。 */
+  function commandEnabled(id: CommandId): boolean {
+    switch (id) {
+      case 'format.bold':
+      case 'format.strike':
+      case 'format.highlight':
+      case 'format.code':
+      case 'format.clear':
+      case 'format.comment':
+      case 'edit.deleteSelection':
+      case 'revision.markDelete':
+      case 'revision.insert':
+        return Boolean(selection)
+      case 'revision.acceptAll':
+      case 'revision.rejectAll':
+        return revisions.total > 0
+      case 'tabs.prev':
+      case 'tabs.next':
+      case 'tabs.close':
+        return openDocuments.length > 1
+      case 'edit.undo':
+      case 'edit.redo':
+      case 'file.exportDirect':
+      case 'file.exportClean':
+      case 'file.exportCustom':
+        return Boolean(activeDocument)
+      default:
+        return true
+    }
+  }
+
+  function executeCommand(id: CommandId) {
+    switch (id) {
+      case 'file.new': newDocument(); break
+      case 'file.import': fileInputRef.current?.click(); break
+      case 'file.exportDirect':
+        if (!activeDocument) return
+        handleExport()
+        notify(t('toast.markdownExported'))
+        break
+      case 'file.exportClean': handleExportClean(); break
+      case 'file.exportCustom': setModal('export'); break
+      case 'file.print': window.print(); break
+      case 'file.settings': setSettingsTab('general'); setModal('settings'); break
+      case 'edit.undo': undoDocument(); break
+      case 'edit.redo': redoDocument(); break
+      case 'edit.deleteSelection': deleteSelection(); break
+      case 'format.bold': handleFormat('bold'); break
+      case 'format.strike': handleFormat('strikethrough'); break
+      case 'format.highlight': handleFormat('highlight'); break
+      case 'format.code': handleFormat('code'); break
+      case 'format.clear': handleFormat('clear'); break
+      case 'format.comment': if (selection) setModal('comment'); break
+      case 'revision.toggle': toggleRevisionMode(); break
+      case 'revision.markDelete': handleMarkDelete(); break
+      case 'revision.insert': if (selection) setModal('revision'); break
+      case 'revision.acceptAll': resolveAllRevisions('accept'); break
+      case 'revision.rejectAll': resolveAllRevisions('reject'); break
+      case 'view.rendered': switchMode('rendered'); break
+      case 'view.split': switchMode('split'); break
+      case 'view.source': switchMode('source'); break
+      case 'view.paged': updateSettings({ viewMode: 'paged' }); break
+      case 'view.continuous': updateSettings({ viewMode: 'continuous' }); break
+      case 'view.sidebar': updateSettings({ layout: toggleSidebar(layout) }); break
+      case 'view.comments': updateSettings({ showComments: !settings.showComments }); break
+      case 'view.focus': setFocusMode((value) => !value); break
+      case 'tabs.prev': cycleTab(-1); break
+      case 'tabs.next': cycleTab(1); break
+      case 'tabs.close': if (activeDocument) closeDocument(activeDocument.id); break
+      case 'help.shortcuts': setSettingsTab('shortcuts'); setModal('settings'); break
+    }
+  }
+
+  // 监听只挂一次，命令实现通过 ref 取最新闭包 —— 选区每变一次就重挂监听会漏掉按键。
+  const runtimeRef = useRef({ run: executeCommand, enabled: commandEnabled })
+  useEffect(() => {
+    runtimeRef.current = { run: executeCommand, enabled: commandEnabled }
+  })
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isShortcutCapturing() || event.isComposing) return
+      const binding = eventToBinding(event)
+      if (!binding) return
+      const id = keyIndex.get(binding)
+      if (!id) return
+      // 焦点在输入框里时只放行不碰正文的命令：撤销、退格、加粗交给浏览器原生行为。
+      if (!ALLOWED_WHILE_TYPING.has(id) && isTextEntryTarget(event.target)) return
+      if (!runtimeRef.current.enabled(id)) return
+      event.preventDefault()
+      runtimeRef.current.run(id)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [keyIndex])
+
+  // 菜单项上的键位永远取当前 keymap，改完快捷键菜单立刻跟着变。
+  const tabMenuDocument = tabMenu ? documents.find((document) => document.id === tabMenu.id) : undefined
+  const documentMenuActions: DocumentMenuActions = {
+    onOpen: openDocument,
+    // 标签栏没有就地改名：把焦点交给顶部的标题输入框，改完三处标题一起同步。
+    onRename: (id) => {
+      openDocument(id)
+      window.setTimeout(() => document.querySelector<HTMLInputElement>('.document-identity input')?.select(), 0)
+    },
+    onDuplicate: duplicateDocument,
+    onExport: exportDocument,
+    onClose: closeDocument,
+    onDelete: deleteDocument,
+    onSaveToDisk: saveDocumentToDisk,
+    onUnbind: unbindDocument,
+    onReload: reloadDocument,
+    onCopyPath: copyDocumentPath,
+  }
+
+  const menus: MenuBarMenu[] = MENU_GROUPS.map((group) => ({
+    id: group.id,
+    label: t(group.labelKey),
+    entries: COMMANDS.filter((command) => command.group === group.id).map((command) => ({
+      id: command.id,
+      label: t(command.labelKey),
+      shortcut: shortcutLabel(command.id),
+      disabled: !commandEnabled(command.id),
+      active: command.id === 'revision.toggle' ? settings.revisionMode : undefined,
+      onSelect: () => executeCommand(command.id),
+    })),
+  }))
+
   const panels: PanelDescriptor[] = [
     {
       id: 'examples',
@@ -756,7 +1175,13 @@ export default function App() {
           activeId={activeDocument?.id ?? ''}
           activeLocalPath={activeDocument?.localPath ?? ''}
           folder={folder
-            ? { name: folder.name, writable: folder.writable, files: folder.files.map((file) => ({ path: file.path, title: file.title })) }
+            ? {
+              name: folder.name,
+              writable: folder.writable,
+              truncated: folder.truncated,
+              scanning: folderScanning,
+              files: folder.files.map((file) => ({ path: file.path, title: file.title })),
+            }
             : null}
           onOpen={openDocument}
           onNew={newDocument}
@@ -765,11 +1190,15 @@ export default function App() {
           onExport={exportDocument}
           onClose={closeDocument}
           onDelete={deleteDocument}
-          onOpenFolder={connectFolder}
+          onOpenFolder={() => void connectFolder()}
           onRefreshFolder={refreshFolder}
           onDisconnectFolder={disconnectFolder}
           onPermitWrite={permitFolderWrite}
           onOpenLocalFile={openLocalFile}
+          onSaveToDisk={saveDocumentToDisk}
+          onUnbind={unbindDocument}
+          onReload={reloadDocument}
+          onCopyPath={copyDocumentPath}
         />
       ),
     },
@@ -798,6 +1227,7 @@ export default function App() {
           <span className="brand-mark">{t('brand.name').slice(0, 1)}</span>
           <span><strong>{t('brand.name')}</strong><small>{t('brand.latin')}</small></span>
         </button>
+        <MenuBar menus={menus} label={t('menu.label')} />
         <div className="document-identity">
           <input
             value={activeDocument.name}
@@ -813,27 +1243,40 @@ export default function App() {
         <div className="header-actions">
           <input ref={fileInputRef} type="file" accept=".md,.markdown,.mdown,.mkd,.txt" multiple hidden onChange={(event) => importFiles(event.target.files)} />
           <button className="header-button" onClick={() => fileInputRef.current?.click()}><Import size={16} /><span>{t('header.import')}</span></button>
-          <ExportMenu onDirect={handleExport} onClean={handleExportClean} onCustom={() => setModal('export')} />
+          <ExportMenu
+            shortcuts={{
+              direct: shortcutLabel('file.exportDirect'),
+              clean: shortcutLabel('file.exportClean'),
+              custom: shortcutLabel('file.exportCustom'),
+            }}
+            onDirect={handleExport}
+            onClean={handleExportClean}
+            onCustom={() => setModal('export')}
+          />
           <button className="icon-button" title={t('header.print')} onClick={() => window.print()}><Printer size={18} /></button>
           <span className="header-divider" />
           <GitHubStar />
-          <button className="icon-button" title={t('header.settings')} onClick={() => setModal('settings')}><Settings2 size={19} /></button>
-          <button className="user-avatar" title={t('header.user', { name: settings.userName || t('comments.anonymous') })} onClick={() => setModal('settings')}>{(settings.userName || t('header.userFallback')).slice(0, 1)}</button>
+          <button className="icon-button" title={t('header.settings')} onClick={() => { setSettingsTab('general'); setModal('settings') }}><Settings2 size={19} /></button>
+          <button className="user-avatar" title={t('header.user', { name: settings.userName || t('comments.anonymous') })} onClick={() => { setSettingsTab('general'); setModal('settings') }}>{(settings.userName || t('header.userFallback')).slice(0, 1)}</button>
         </div>
       </header>
 
-      <div className="tab-strip">
-        <div className="tab-scroll">
-          {openDocuments.map((document) => (
-            <div className={`document-tab ${document.id === activeDocument.id ? 'active' : ''}`} key={document.id}>
-              <button className="tab-main" onClick={() => openDocument(document.id)}><FileText size={14} /><span>{displayName(document)}</span></button>
-              <button className="tab-close" title={t('tabs.close')} onClick={() => closeDocument(document.id)}><X size={13} /></button>
-            </div>
-          ))}
-          <button className="new-tab" title={t('tabs.new')} onClick={newDocument}><Plus size={17} /></button>
-        </div>
-        <button className="focus-toggle" onClick={() => setFocusMode((value) => !value)}>{focusMode ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}{focusMode ? t('tabs.focusOff') : t('tabs.focusOn')}</button>
-      </div>
+      <TabStrip
+        tabs={openDocuments.map((document) => ({ id: document.id, label: displayName(document) }))}
+        activeId={activeDocument.id}
+        onSelect={openDocument}
+        onClose={closeDocument}
+        onNew={newDocument}
+        onReorder={reorderTabs}
+        onShift={shiftTabOrder}
+        onContextMenu={(id, x, y) => setTabMenu({ id, x, y })}
+        trailing={(
+          <button className="focus-toggle" onClick={() => setFocusMode((value) => !value)}>
+            {focusMode ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            {focusMode ? t('tabs.focusOff') : t('tabs.focusOn')}
+          </button>
+        )}
+      />
 
       <div className="workspace">
         {layout.visible && !focusMode && (
@@ -966,6 +1409,17 @@ export default function App() {
         </div>
       )}
 
+      {tabMenu && tabMenuDocument && (
+        <DocumentMenu
+          x={tabMenu.x}
+          y={tabMenu.y}
+          document={tabMenuDocument}
+          folderConnected={Boolean(folder)}
+          actions={documentMenuActions}
+          onClose={() => setTabMenu(null)}
+        />
+      )}
+
       {selectionMenu && (
         <SelectionMenu
           x={selectionMenu.x}
@@ -995,9 +1449,12 @@ export default function App() {
         uiFont={settings.uiFont}
         uiScale={settings.uiScale}
         docFont={settings.docFont}
+        keymap={keymap}
+        initialTab={settingsTab}
         onUserName={(userName) => updateSettings({ userName })}
         onLocale={(locale) => updateSettings({ locale })}
         onAppearance={(patch) => updateSettings(patch)}
+        onKeymap={(next) => updateSettings({ keymap: next })}
         onConfig={updateConfig}
         onResetLayout={() => { updateSettings({ layout: createDefaultLayout() }); notify(t('toast.layoutReset')) }}
         onClose={() => setModal(null)}
