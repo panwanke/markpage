@@ -1,209 +1,238 @@
-# 墨页 MarkPage
+# MarkPage 墨页
 
-本地优先的 Markdown 排版阅读与批注应用。Markdown 源文件是唯一的真相源：排版、标注、页面设置与评论全部随 `.md` 一起导出。
+> English | [简体中文](README_zh.md)
 
-**在线使用**：[panwanke.github.io/markpage](https://panwanke.github.io/markpage/) · [markpage-dl2.pages.dev](https://markpage-dl2.pages.dev/)（镜像）—— 无需安装，打开即用。文档只存在浏览器本地，不上传任何服务器。
+A local-first Markdown reading, typesetting and annotation app. The Markdown source file is the single source of truth: layout, highlights, page setup and comments all travel with the `.md` file when you export it.
+
+**Use it online**: [panwanke.github.io/markpage](https://panwanke.github.io/markpage/) · [markpage-dl2.pages.dev](https://markpage-dl2.pages.dev/) (mirror) — nothing to install, opens in the browser. Documents stay in your browser; no server ever receives them.
+
+## Quick start
 
 ```bash
 npm install
-npm run dev      # 开发预览 http://127.0.0.1:5173
-npm run build    # 类型检查 + 生产构建
-npm test         # 核心链路单元测试
-npm run lint     # 静态检查
+npm run dev      # dev server at http://127.0.0.1:5173
+npm run build    # type check + production build
+npm test         # unit tests for the core pipeline
+npm run lint     # static analysis
 ```
 
-## 核心能力
+Requires Node.js 20.19+ or 22.12+ (what Vite 8 asks for). Only the local-folder feature (File System Access API) needs a Chromium-based browser; everything else also runs in Firefox and Safari.
 
-| 能力 | 实现方式 |
+## What it does
+
+MarkPage turns a `.md` file into a paginated, printable document you can mark up — while keeping the file itself readable in any other editor. There is no proprietary document format and no import/export round trip: open a file, annotate it, save it, and the result is still plain Markdown.
+
+## Features
+
+| Capability | How it works |
 | :--- | :--- |
-| Markdown 排版 | unified / remark + rehype 管线，支持 GFM、脚注、表格、任务列表 |
-| 公式与代码 | KaTeX 渲染行内与块级公式；highlight.js 只加载常用语言 |
-| 双栏视图 | 左排版右源码并排：改源码左栏立刻重排，改排版（标注）右栏立刻更新；中间分隔条可拖动，双击复位，宽度随偏好保存 |
-| 修订模式 | 新增写 `<ins>`、删除写 `~…~`，正文按 Word 习惯显示（绿色下划线 / 红色删除线）；源码编辑器里打字、退格、粘贴自动记修订；单条与整篇都能接受 / 拒绝；公式与代码块不参与修订 |
-| 选区标注 | 在渲染正文上选字，加粗 / 删除线 / 高亮 / 行内代码 / 文字颜色 / 清除格式，直接写回源码 |
-| 右键改色 | 正文上右键：高亮底色与文字颜色色板、当前颜色打勾、取消高亮 / 默认色、加粗、删除线、行内代码、清除格式、加评论、复制；右键落在高亮上时自动命中整段，不必先拖选 |
-| 多轮评论 | `<comment id="…">` 锚点 + `> [!comment …]` callout，支持回复、解决、删除 |
-| 页面系统 | A4 / Letter 实际测量分页，页眉页脚、页码、字号行距 |
-| 工作区 | 多标签、本地自动保存、导入 `.md`、拖拽打开、源码模式、大纲、专注模式、打印 / PDF |
-| 标签排序 | 拖动标签即可调整打开文档的顺序（`Alt` + `←` / `→` 也能移动），关闭着的文档留在原位不动 |
-| 菜单栏与快捷键 | 顶部菜单栏把每条命令和它**当前生效**的键位一起列出来；键位可在 设置 → 快捷键 里逐条录制，冲突当场报出，不会悄悄覆盖 |
-| 撤销 / 重做 | 每篇文档各持一份撤销栈，600ms 内的连续输入合并成一步；撤销的是全文快照，修订标记也一起回退 |
-| 文档右键菜单 | 工作区列表项与标签栏共用同一份菜单：打开 / 重命名 / 复制一份 / 导出 .md / 保存到磁盘 / 从磁盘重新载入 / 复制路径 / 解除绑定 / 关闭 / 删除；键盘用 `Shift+F10` 或 Menu 键也能唤出，关闭后焦点回到触发处 |
-| 本地文件夹 | 直接连上磁盘目录（File System Access API），列出其中的 `.md`，点击即读、改完写回原文件；一次最多收 2000 个文件，触顶会提示列表被截断 |
-| 停靠侧边栏 | 示例库 / 工作区 / 大纲是可拖动的面板：拖到一起合并成标签页，拖到底部拆成新组，可关闭、可调宽度、可整栏隐藏；布局随偏好持久化 |
-| 多语言 | 中 / 英双语，界面语言即时切换；词表按语言分文件，新增语言只需补一份并注册，类型检查保证不漏键 |
-| 外观 | 界面字体与字号缩放（默认 115%，侧栏、状态栏与评论面板一并放大）、正文字体族；随偏好本地保存 |
-| 三档导出 | **直接导出**原样带走；**纯净导出**剥掉 comment 锚点、评论块与高亮颜色；**自定义导出**按颜色把标签映射成自己的 class / 行内样式，带实时预览 |
-| 插件接口 | 预留命令、渲染器、文档访问与生命周期 API（暂不开放第三方安装） |
+| Markdown typesetting | unified / remark + rehype pipeline with GFM, footnotes, tables and task lists |
+| Math and code | KaTeX for inline and display math; highlight.js loads only common languages |
+| Split view | Rendered pane on the left, source on the right, both backed by one `markdown` state: editing source re-typesets the left pane instantly, annotating on the left writes markup into the right pane instantly. Draggable divider (22%–75%, double-click resets to 42%), ratio persisted |
+| Revision mode | Insertions as `<ins>`, deletions as `~…~`, displayed Word-style (green underline / red strikethrough). Typing, backspacing and pasting in the source editor are recorded as revisions; accept or reject one at a time or the whole document; math and code blocks are excluded |
+| Selection markup | Select rendered text to apply bold, strikethrough, highlight, inline code, text colour or clear formatting — written straight back into the source |
+| Right-click recolouring | Right-click the body for highlight and text-colour swatches, a tick on the current colour, clear highlight / default colour, bold, strikethrough, inline code, clear formatting, add comment, copy. Right-clicking inside a highlight hits the whole span, no dragging needed |
+| Threaded comments | `<comment id="…">` anchors plus `> [!comment …]` callouts, with reply, resolve and delete |
+| Page system | Real A4 / Letter measurement and pagination, headers and footers, page numbers, font size and line height |
+| Workspace | Multiple tabs, local autosave, import `.md`, drag to open, source mode, outline, focus mode, print / PDF |
+| Tab ordering | Drag tabs to reorder what is open (`Alt` + `←` / `→` also work); closed documents keep their slot |
+| Menu bar and shortcuts | The menu bar lists every command together with the key binding **currently in effect**; bindings are recorded per-row under Settings → Shortcuts, conflicts are reported on the spot instead of silently overwriting |
+| Undo / redo | One stack per document, consecutive input within 600 ms merged into a single step; undo restores a full snapshot, revision marks included |
+| Document context menu | Workspace rows and tabs share one menu: open, rename, duplicate, export `.md`, save to disk, reload from disk, copy path, unbind, close, delete. Reachable with `Shift+F10` or the Menu key; focus returns to the trigger on close |
+| Local folder | Connect a directory on disk (File System Access API), list its `.md` files, read on click and write edits back to the original file; up to 2000 files per scan, with a truncation notice at the cap |
+| Dockable sidebar | Example library / workspace / outline are draggable panels: drop one onto another to merge into tabs, drop onto the bottom zone to split into a new group; closable, resizable, collapsible; layout persisted |
+| Internationalisation | Chinese / English with instant switching; one flat key table per language, adding a language means adding one file and registering it, and type checking guarantees no missing keys |
+| Appearance | UI font family and scale (115% by default, sidebar, status bar and comment panel scale with it), body font family; saved locally |
+| Three export modes | **Direct** takes everything as-is; **clean** strips comment anchors, comment blocks and highlight colours; **custom** maps colours to your own classes / inline styles, with live preview |
+| Plugin API | Command, renderer, document-access and lifecycle APIs reserved (third-party installation not open yet) |
 
-页面设置写入 YAML Frontmatter；用户名、视图开关、语言、侧边栏布局与外观（字体 / 字号缩放）等偏好保存在浏览器本地。界面字号通过 CSS 变量 `--ui-scale` 统一缩放，侧栏与评论面板的宽度跟着 `--ui-width`（以默认 115% 为基准）一起放大，正文字体走 `--doc-font`，与文档自身的字号行距互不干扰。
+Page setup is written into the YAML frontmatter; user name, view toggles, language, sidebar layout and appearance (font / scale) live in browser storage. UI scale is applied through the `--ui-scale` CSS variable, sidebar and comment-panel widths follow `--ui-width` (relative to the 115% default), and body text uses `--doc-font`, so app chrome never interferes with the document's own font size and line height.
 
-## 双栏视图
+## Split view
 
-工具栏的 `排版 / 双栏 / 源码` 三档切换。双栏 = 左边排版、右边源码，两边共用一个 `markdown` 状态：
+The toolbar switches between `Typeset / Split / Source`. Split means rendered on the left, source on the right, sharing one `markdown` state:
 
-- 在右栏改源码，左栏立刻重排；在左栏选字加标注，右栏立刻出现对应的 `**`、`<mark>` 等标记。
-- 中间的分隔条可以拖动（源码栏占 22%–75%），双击复位到 42%，比例存在偏好里。
-- 左栏在双栏下固定为连续视图 —— 纸张是 794px 宽，塞进半屏只会横向滚动；分页视图仍只在单栏排版模式生效。
+- Edit the right pane and the left pane re-typesets immediately; select text on the left and add a markup and the corresponding `**`, `<mark>` and friends appear on the right.
+- The divider between them is draggable (source pane 22%–75%); double-click resets it to 42%, and the ratio is stored in preferences.
+- The left pane is always continuous in split view — the page is 794 px wide, so squeezing it into half a screen would only produce horizontal scrolling. Paginated view still applies to single-pane typeset mode only.
 
-## 菜单栏与快捷键
+## Menu bar and shortcuts
 
-顶栏左侧是菜单栏：**文件 / 编辑 / 格式 / 修订 / 视图 / 标签页 / 帮助**。每一项右侧显示的键位都从当前键位表现算，改过快捷键后菜单立刻跟着变——菜单本身就是这份快捷键的说明书。
+The top-left of the header is a menu bar: **File / Edit / Format / Revision / View / Tabs / Help**. The binding shown next to each item is computed from the live keymap, so remapping a shortcut updates the menu immediately — the menu is documentation for the keymap.
 
-命令定义集中在 `src/lib/shortcuts.ts` 的 `COMMANDS` 里：一条命令 = id + 分组 + 文案键 + 默认键位。菜单栏、全局监听、设置面板都从这张表派生，新增命令只加一行，界面自动出现。
+Commands live in `COMMANDS` in `src/lib/shortcuts.ts`: one command = id + group + label key + default binding. The menu bar, the global listener and the settings panel are all derived from that single table; adding a command is one row, and the UI picks it up.
 
-| 分组 | 默认键位 |
+| Group | Default bindings |
 | :--- | :--- |
-| 文件 | 新建 `Ctrl/⌘+Alt+N` · 导入 `+Alt+O` · 直接导出 `+S` · 纯净导出 `+Shift+S` · 自定义导出 `+Alt+S` · 打印 `+P` · 设置 `+,` |
-| 编辑 | 撤销 `+Z` · 重做 `+Shift+Z`（`+Y` 同样可用） · 删除选区 `Delete` |
-| 格式 | 加粗 `+B` · 删除线 `+Shift+X` · 高亮 `+Shift+H` · 行内代码 `+Shift+C` · 清除格式 `+\` · 评论 `+Alt+M` |
-| 修订 | 切换修订 `+Shift+R` · 标记删除 `+Alt+D` · 插入 / 替换 `+Alt+I` · 接受全部 `+Alt+Enter` · 拒绝全部 `+Alt+Backspace` |
-| 视图 | 排版 / 双栏 / 源码 `+Alt+1/2/3` · 分页 / 连续 `+Alt+P` `+Alt+C` · 侧边栏 `+Shift+B` · 评论 `+Shift+M` · 专注 `+Shift+F` |
-| 标签页 | 上一个 / 下一个 `+Alt+←` `+Alt+→` · 关闭当前 `+Alt+W` |
+| File | New `Ctrl/⌘+Alt+N` · Import `+Alt+O` · Export directly `+S` · Export clean `+Shift+S` · Export custom `+Alt+S` · Print `+P` · Settings `+,` |
+| Edit | Undo `+Z` · Redo `+Shift+Z` (`+Y` also works) · Delete selection `Delete` |
+| Format | Bold `+B` · Strikethrough `+Shift+X` · Highlight `+Shift+H` · Inline code `+Shift+C` · Clear formatting `+\` · Comment `+Alt+M` |
+| Revision | Toggle revision `+Shift+R` · Mark deletion `+Alt+D` · Insert / replace `+Alt+I` · Accept all `+Alt+Enter` · Reject all `+Alt+Backspace` |
+| View | Typeset / Split / Source `+Alt+1/2/3` · Paginated / continuous `+Alt+P` `+Alt+C` · Sidebar `+Shift+B` · Comments `+Shift+M` · Focus `+Shift+F` |
+| Tabs | Previous / next `+Alt+←` `+Alt+→` · Close current `+Alt+W` |
 
-上表里前缀相同的一律省略了 `Ctrl/⌘`。默认键位刻意绕开了浏览器的保留键（`Ctrl+N` `Ctrl+T` `Ctrl+W` `Ctrl+1..9`）：那些键在页面里 `preventDefault()` 也拦不住，写上去只会看起来「没生效」。
+Rows sharing a prefix omit `Ctrl/⌘` after the first. The defaults deliberately avoid browser-reserved keys (`Ctrl+N`, `Ctrl+T`, `Ctrl+W`, `Ctrl+1..9`): those cannot be intercepted even with `preventDefault()`, so binding them would only look like "the shortcut does not work".
 
-**改键**：设置 → 快捷键，点任意一行的键位就进入录制，按下组合即生效。三条规则：
+**Remapping**: Settings → Shortcuts, click any row's binding to start recording, press the combination to apply. Three rules:
 
-- 必须带 `Ctrl/⌘` 或 `Alt`，或者本身就是 `Delete`、`F1–F12` 这类不会打断输入的键；`Esc` 取消、`退格` 清空（清空后这一项不占任何键）。
-- 与别的命令撞车时**不覆盖**，直接报出占用它的那条命令名，让用户决定改哪一个。
-- 录制期间全局监听临时停摆，否则录 `Ctrl+B` 会顺手把加粗真的执行一次。
+- A binding must include `Ctrl/⌘` or `Alt`, or be a key that cannot interrupt typing such as `Delete` or `F1–F12`. `Esc` cancels, `Backspace` clears (a cleared entry occupies no key).
+- A conflict does **not** overwrite silently: the app names the command that already owns the combination and lets you decide which one to change.
+- The global listener is paused while recording, otherwise recording `Ctrl+B` would also apply bold for real.
 
-**焦点在输入框里时不抢键**：源码编辑器是原生 `<textarea>`，撤销、退格、删除都还归浏览器管；只有导出、切换视图、切标签这类不碰正文的命令照常响应。正文（排版视图）上的 `Delete` 才是应用自己的语义：修订模式打开时记成 `~删除~`，关闭时直接从源码里抹掉。
+**No key stealing while an input has focus**: the source editor is a native `<textarea>`, so undo, backspace and delete remain the browser's job. Only commands that never touch the body — export, switching views, switching tabs — respond. `Delete` on the body (typeset view) is the app's own semantics: with revision mode on it is recorded as `~deleted~`, otherwise the text is removed from the source.
 
-键位表存在 `markpage.settings.v1` 的 `keymap` 字段里，只存与默认值的差异项也算完整表——读取时缺项落回默认、写坏的键位丢掉、空串（用户主动清空）保留。
+The keymap lives in the `keymap` field of `markpage.settings.v1`, and a partial table is treated as complete: missing entries fall back to the default, corrupt entries are dropped, and empty strings (a binding the user cleared on purpose) are kept.
 
-## 标签页排序
+## Tab ordering
 
-标签栏用原生 HTML5 拖放：拖到目标标签的左半边插到它前面，右半边插到后面，拖动时源标签半透明、目标侧出现一条紫色指示线。窗口级的「拖入 .md 打开」只认 `Files` 类型，两套拖放不会互相抢事件。
+The tab strip uses native HTML5 drag and drop: drop on the left half of a target tab to insert before it, right half to insert after; the dragged tab turns translucent and a purple indicator line appears on the target side. The window-level "drop a `.md` to open" handler only accepts `Files`, so the two drag systems never fight over the same event.
 
-重排只改**已打开**文档彼此的次序——文档数组里还躺着关闭着的文档，它们的槽位不动，所以左侧工作区列表的顺序不会被拖标签的动作打乱（`src/lib/tabs.ts` 的 `reorderOpenDocuments`）。键盘可达：标签聚焦后 `Alt` + `←` / `→` 左右挪一位。
+Reordering only changes the order of **open** documents — closed documents keep their slots in the document array, so the workspace list on the left is not disturbed by dragging tabs (`reorderOpenDocuments` in `src/lib/tabs.ts`). Keyboard accessible: focus a tab and use `Alt` + `←` / `→` to move it one position.
 
-## 打开文件
+## Opening files
 
-三种入口，落到同一个文档模型上，区别只在「内容住在哪」：
+Three entry points, one document model; the only difference is where the content lives.
 
-| 入口 | 内容来源 | 改动去向 |
+| Entry point | Content source | Where edits go |
 | :--- | :--- | :--- |
-| 导入 / 拖拽 | 文件内容拷进浏览器 | 只在浏览器里；要落到磁盘得再导出 |
-| 本地文件夹 | 磁盘上的原文件 | 写回原文件（600ms 防抖，连续输入只落一次盘） |
+| Import / drag and drop | File content copied into the browser | Browser only; export to get it onto disk |
+| Local folder | The original file on disk | Written back to the original file (600 ms debounce) |
 
-**拖拽**：把 `.md` / `.markdown` / `.mdown` / `.mkd` / `.txt` 从资源管理器拖到窗口任意位置，出现虚线投放框后松手即可，支持一次拖多个。其它类型会提示一句，不会静默丢掉。`dragover` 里必须 `preventDefault()`，否则浏览器会把文件当页面导航，直接离开当前文档。
+**Drag and drop**: drag `.md` / `.markdown` / `.mdown` / `.mkd` / `.txt` from the file manager anywhere onto the window, wait for the dashed drop frame and release; several files at once are fine. Other types produce a message rather than being silently dropped. `dragover` must call `preventDefault()`, otherwise the browser treats the file as navigation and leaves the current document.
 
-Chromium 还能在 drop 时取回真实句柄（`getAsFileSystemHandle()`），于是拖进来的文件直接绑定磁盘、改动写回原文件，和「本地文件夹」里的文件一样；**拖进来的是目录就直接当工作目录连上**。取不到句柄（Firefox / Safari）时退回拷贝进浏览器。
+Chromium also returns a real handle on drop (`getAsFileSystemHandle()`), so a dropped file binds to disk and edits are written back, exactly like a file from the local folder; **dropping a directory connects it as a working directory**. Without handle support (Firefox / Safari) the content is copied into the browser instead.
 
-**本地文件夹**：工作区面板的「文件夹」按钮调起系统选目录对话框，最多向下四层查找 Markdown，跳过 `node_modules`、`.git`、`.obsidian` 之类的目录。点开一个文件后它就有绑定关系：改源码、加标注、写评论都会在 600ms 后写回原文件，工作区条目右侧出现磁盘小图标，文件夹列表里对应文件高亮。
+**Local folder**: the folder button in the workspace panel opens the system directory picker, searches up to four levels deep for Markdown, and skips `node_modules`, `.git`, `.obsidian` and similar. Once a file is opened it is bound: source edits, markup and comments are written back after 600 ms, a disk icon appears next to the workspace entry, and the matching row is highlighted in the folder listing.
 
-- 一次扫描最多收 2000 个文件（Obsidian 仓库动辄几千篇，全量渲染会把界面卡死），触顶会提示「只列出前 N 个」；扫描期间面板里显示「正在读取文件夹…」。
-- 扫描失败（目录被移走、权限被撤销）不会留下半连接状态：句柄从 IndexedDB 里清掉，并提示一句原因。
-- 文档右键菜单里还有四个磁盘动作：**保存到磁盘**（写进已连接的目录并绑定）、**从磁盘重新载入**（外部编辑器改过时用它对齐）、**复制文件路径**、**解除绑定**。
-- 目录句柄存在 IndexedDB 里，下次打开页面自动接回来；但写权限只在刷新时**查询**而不申请，过期时面板里出现「授权写入」按钮，点一下才重新申请。
-- 断开文件夹会同时取消挂起的写盘定时器，并解除属于该目录的绑定关系（拖进来的单个文件不受影响）——否则磁盘小图标会说谎。
-- 只有 Chromium 内核（Chrome / Edge）支持这套 API。不支持的浏览器点「文件夹」会提示改用「导入」，不会静默失败。
-- 写盘失败（权限撤销、文件被删）会提示并保留浏览器里的改动，正文永远不丢。
+- A scan collects at most 2000 files (Obsidian vaults routinely hold thousands of notes and rendering them all would freeze the UI); hitting the cap reports "showing the first N". While scanning the panel says it is reading the folder.
+- A failed scan (directory moved, permission revoked) leaves no half-connected state: the handle is removed from IndexedDB and the reason is reported.
+- The document context menu has four disk actions: **save to disk** (write into the connected directory and bind), **reload from disk** (use it when an external editor changed the file), **copy file path**, **unbind**.
+- Directory handles are stored in IndexedDB and restored on the next page load, but write permission is only **queried** at that point, not requested: when it has expired the panel shows an "authorise writing" button.
+- Disconnecting a folder cancels pending write timers and clears the bindings that belong to that directory (individually dropped files are unaffected) — otherwise the disk icon would lie.
+- Only Chromium (Chrome / Edge) supports this API. In other browsers the folder button suggests Import instead of failing silently.
+- A failed write (permission revoked, file deleted) reports the problem and keeps the browser copy; the body text is never lost.
 
-## 修订模式
+## Revision mode
 
-修订也写进 Markdown，源文件依旧是唯一真相：
+Revisions are written into the Markdown too, so the source stays the single source of truth:
 
-| 语义 | 源码 | 正文显示 |
+| Semantics | Source | Rendered |
 | :--- | :--- | :--- |
-| 删除 | `~被删掉的字~` | 红色删除线 |
-| 新增 | `<ins>新写的字</ins>` | 绿色下划线 |
+| Deletion | `~deleted words~` | Red strikethrough |
+| Insertion | `<ins>new words</ins>` | Green underline |
 
-单波浪号只用于修订，删除线仍然只认 GFM 的 `~~文字~~`（`remark-gfm` 的 `singleTilde` 已关掉）。
+A single tilde is reserved for revisions; strikethrough still requires GFM's `~~text~~` (`singleTilde` in `remark-gfm` is turned off).
 
-| 操作 | 结果 |
+| Action | Result |
 | :--- | :--- |
-| 工具栏的修订开关 | 打开后正文里的修订标记可以点开「接受 / 拒绝」，状态栏出现 `N 处修订` |
-| 源码里打字 | 新输入的内容自动套 `<ins>`，连续输入并入同一条；退格 / 删除选中内容则包成 `~…~`，相邻的删除标记自动合并 |
-| 退格掉自己刚插入的字 | 直接消失，不会留下 `~…~` |
-| 选中正文后点「标记删除」 | 选区包成 `~…~`，再点一次取消 |
-| 选中正文后点「插入 / 替换」 | 弹窗输入新内容：原文留成 `~…~`，新内容写成 `<ins>…</ins>` |
-| 点正文里的修订标记 | 浮层里单独「接受 / 拒绝」这一条 |
-| 工具栏的「接受全部 / 拒绝全部」 | 整篇一次性处理 |
+| Revision toggle in the toolbar | Revision marks in the body become clickable with accept / reject, and the status bar shows `N revisions` |
+| Typing in the source | New input is wrapped in `<ins>`, consecutive input merged into one mark; backspace or deleting a selection wraps it in `~…~`, adjacent deletion marks merged automatically |
+| Backspacing over your own insertion | The text simply disappears, no `~…~` left behind |
+| Select body text → "mark deletion" | The selection is wrapped in `~…~`; clicking again removes it |
+| Select body text → "insert / replace" | A dialog asks for the new text: the original stays as `~…~`, the new text becomes `<ins>…</ins>` |
+| Click a revision mark in the body | A popover accepts or rejects that single mark |
+| Toolbar "accept all / reject all" | Processes the whole document at once |
 
-**公式与代码块不参与修订。** `$…$`、`$$…$$`、行内反引号、``` 围栏与 Frontmatter 都属于保护区：里面的编辑直接生效、不会被套标记，选中它们点「标记删除」会被拒绝并提示。带换行的粘贴、以及 `~ < >` 这类标记符号的手工输入也走直改，避免写出 `~~` 或把代码围栏塞进行内标签。输入法组字过程中不改写文本（会打断候选词），上屏后再一次性记为一条新增。
+**Math and code blocks do not participate in revision.** `$…$`, `$$…$$`, inline backticks, ``` fences and frontmatter are protected zones: edits inside them apply directly without marks, and marking them for deletion is refused with a message. Pastes containing newlines, and manually typed marker characters such as `~ < >`, also edit directly, to avoid producing `~~` or a code fence inside an inline tag. Text is not rewritten while an IME is composing (it would interrupt candidates); after commit the text is recorded as one insertion.
 
-## 停靠侧边栏
+## Dockable sidebar
 
-左侧栏由若干**面板组**组成，每组 = 一条标签栏 + 一个内容区，默认「示例库 / 工作区 / 文档大纲」各成一组。
+The left sidebar is made of **panel groups**, each being a tab strip plus a content area. By default the example library, workspace and document outline each get their own group.
 
-| 操作 | 结果 |
+| Action | Result |
 | :--- | :--- |
-| 拖动面板标签到另一组的标签栏 | 两组合并，面板变成并排标签页（拖到标签左/右半边决定插入位置） |
-| 拖动面板标签到底部虚线投放区 | 该面板拆成独立的新面板组 |
-| 拖动标签栏右侧把手 | 调整面板组的上下顺序 |
-| 标签上的 `×` / 右上角 `+` | 关闭面板 / 从列表里重新打开 |
-| 拖动侧栏右边缘 | 调整宽度（双击复位 236px，范围 190–520；实际宽度再乘 `--ui-width`） |
-| 面板组右上角按钮或工具栏图标 | 整栏隐藏 / 显示 |
-| 标签聚焦后 `←` `→` / `Home` `End` / `Delete` | 切换标签 / 跳到首尾 / 关闭当前面板 |
-| 侧栏右边缘聚焦后 `←` `→`（`Shift` 加大步长）/ `Home` | 键盘调宽 / 复位默认宽度 |
-| `+` 菜单打开后 `↑` `↓` / `Esc` | 在面板列表里移动 / 关闭菜单 |
+| Drag a panel tab onto another group's tab strip | The groups merge and the panel becomes a sibling tab (left / right half decides the position) |
+| Drag a panel tab onto the bottom dashed drop zone | The panel splits off into a new group |
+| Drag the handle at the right end of a tab strip | Reorders the groups vertically |
+| `×` on a tab / `+` at the top right | Close the panel / reopen it from the list |
+| Drag the sidebar's right edge | Resize (double-click resets to 236 px, range 190–520; multiplied by `--ui-width`) |
+| Button at the top right of a group, or the toolbar icon | Hide / show the whole sidebar |
+| Focus a tab, then `←` `→` / `Home` `End` / `Delete` | Switch tabs / jump to first or last / close the panel |
+| Focus the sidebar's right edge, then `←` `→` (`Shift` for bigger steps) / `Home` | Resize by keyboard / reset to default |
+| `+` menu open, then `↑` `↓` / `Esc` | Move through the panel list / close the menu |
 
-布局存在 `markpage.settings.v1` 的 `layout` 字段里，刷新、重开浏览器都保持原样；旧版本只有 `showOutline` 布尔值时会被自动迁移成默认布局。设置 → 通用 里可以一键恢复默认布局。窄于 1020px 时侧栏宽度固定为 200px 且隐藏拖拽把手，窄于 780px 时整栏收起、工具栏的显隐按钮也一并隐藏（否则会出现「按了没反应却改了状态」的假控件）。
+The layout lives in the `layout` field of `markpage.settings.v1` and survives reloads and browser restarts; the older boolean `showOutline` is migrated to the default layout automatically. Settings → General restores the default layout in one click. Below 1020 px the sidebar width is fixed at 200 px and the drag handle is hidden; below 780 px the sidebar collapses and its toolbar toggle is hidden too (otherwise you get a control that changes state without visible effect).
 
-## 多语言
+## Internationalisation
 
-`src/i18n/locales/` 下每个语言一份**扁平键值**词表：`zh-CN.ts` 是唯一真相源，`en-US.ts` 用 `Record<MessageKey, string>` 约束，漏翻一个键就编译不过。文案支持 `{name}` 占位符；**数字参数按当前语言格式化**（千分位），所以调用方要传原始数字而不是先 `toLocaleString()`。
+`src/i18n/locales/` holds one **flat key table** per language: `zh-CN.ts` is the source of truth, and `en-US.ts` is typed as `Record<MessageKey, string>`, so a missing key breaks the build. Messages support `{name}` placeholders; **numeric arguments are formatted for the current locale** (thousands separators), so callers pass raw numbers rather than pre-formatted strings.
 
-复数走可选后缀：词表里写 `key.one` / `key.other`（也支持 `zero` / `two` / `few` / `many`），运行时按 `Intl.PluralRules` 选，没有对应变体就落回基础键。中文是单形态语言，只写基础键即可；英文给 `status.words`、`status.page` 这类带计数的文案补了 `.one`。
+Plurals use optional suffixes: `key.one` / `key.other` (also `zero` / `two` / `few` / `many`), selected at runtime via `Intl.PluralRules`, falling back to the base key when a variant is absent. Chinese is monomorphic and needs only base keys; English adds `.one` for counted messages such as `status.words` and `status.page`.
 
-新增一门语言：
+Adding a language:
 
-1. 复制 `src/i18n/locales/zh-CN.ts` 为 `xx-XX.ts`，翻译右侧的值（需要复数就补 `key.one` 等后缀键）；
-2. 在 `src/i18n/index.ts` 的 `LOCALES` 数组里加一行 `{ id, label, short, htmlLang, messages }`（`label` 用该语言自称）；
-3. 设置 → 语言 里自动出现这个选项，`<html lang>`、日期格式（`toLocaleDateString`）与数字格式一并跟着切换。
+1. Copy `src/i18n/locales/zh-CN.ts` to `xx-XX.ts` and translate the values (add `key.one` and friends where plurals apply);
+2. Add one row `{ id, label, short, htmlLang, messages }` to the `LOCALES` array in `src/i18n/index.ts` (`label` written in that language);
+3. The option appears in Settings → Language, and `<html lang>`, date formatting (`toLocaleDateString`) and number formatting follow it.
 
-`npm test` 里的 `i18n/index.test.ts` 会守住三件事：每门语言覆盖全部键、同一文案的占位符集合与 zh-CN 一致、复数变体有兜底。
+`i18n/index.test.ts` in `npm test` guards three things: every language covers every key, placeholder sets match `zh-CN` for the same message, and plural variants have a fallback.
 
-界面语言在首帧之前就从设置里读出来，不会先闪一下默认语言。翻译只作用于应用外壳：Markdown 正文、评论内容与 Frontmatter 永远原样保留。文档名留空即「未命名」，标签页、标题框与页面页眉统一按当前语言现算——翻译结果不会写进数据，所以切换语言时三处始终一致。
+The interface language is read from settings before the first frame, so the UI never flashes the default language. Translation applies to the app shell only: Markdown bodies, comment content and frontmatter are always preserved as-is. An empty document name means "untitled", computed on the fly for the tab, the title field and the page header, so the three stay consistent when the language changes — nothing derived is ever written into the data.
 
-## 示例库
+## Example library
 
-`examples/` 下的文档会编译进应用，可在左侧栏「示例库」中一键载入为可编辑文档，也可以直接用「导入」打开。
+Documents under `examples/` are bundled into the app, loadable from the sidebar's example library as editable documents, or openable through Import.
 
-| 示例 | 用途 |
+| Example | Purpose |
 | :--- | :--- |
-| `01-技术设计-插件系统.md` | 多语言代码块、API 表格、任务清单 |
-| `02-Markdown-语法总览.md` | 全部语法块型的渲染自检 |
-| `03-读书笔记-技术与时间.md` | 长文分页与大纲层级 |
+| `01-技术设计-插件系统.md` | Multilingual code blocks, API tables, task lists |
+| `02-Markdown-语法总览.md` | Rendering self-check for every syntax block |
+| `03-读书笔记-技术与时间.md` | Long-document pagination and outline depth |
 
-## 源码结构
+## Tech stack
+
+| Layer | Choice |
+| :--- | :--- |
+| Framework | React 19 + TypeScript, built with Vite 8 |
+| Markdown pipeline | unified (remark-parse → remark-gfm / math / frontmatter → remark-rehype → rehype-raw / slug / katex / highlight) |
+| Math and code | KaTeX, lowlight / highlight.js (common languages only) |
+| Styling | Plain CSS with custom properties (`--ui-scale`, `--ui-width`, `--doc-font`); no UI framework |
+| Testing | Vitest — 177 cases covering the rendering pipeline, revisions, export, i18n, shortcuts, tabs and storage |
+| Static analysis | oxlint + `tsc -b` |
+
+There is no backend at runtime: documents and preferences live in localStorage, directory handles in IndexedDB, and export goes through the browser's download flow.
+
+## Project structure
 
 ```
 src/
-  lib/markdown.ts     渲染管线、源码位置映射、标注与评论的写回（含取消高亮 / 取消文字色）
-  lib/palette.ts      高亮与文字色色板、rgb → hex 归一化（工具栏与右键菜单共用）
-  lib/localfs.ts      本地文件夹：选目录、递归扫描、读写文件、目录句柄持久化
-  lib/revision.ts     修订：识别 ~删除~ / <ins>新增</ins>、公式与代码保护区、接受拒绝、
-                      源码编辑追踪（打字 / 退格 / 粘贴反推成修订标记）
-  lib/highlight.ts    精简版代码高亮插件（仅注册常用语言；新增语言须同步 vite.config.ts 的
-                      optimizeDeps.include —— 语言文件是 CJS，不预打包 dev 会白屏，有测试守护）
-  lib/export.ts       三档导出：标签映射、颜色映射、Frontmatter 裁剪
-  lib/fonts.ts        界面 / 正文字体栈与字号缩放边界
-  lib/storage.ts      本地文档与偏好存储
-  lib/layout.ts       侧边栏停靠布局：面板分组、搬动 / 关闭 / 重排与存储还原
-  lib/shortcuts.ts    命令表与键位：解析、格式化、冲突检测、录制期间暂停监听
-  lib/history.ts      撤销 / 重做栈（按文档各一份，连续输入合并）
-  lib/tabs.ts         标签重排：只改打开文档的次序，键盘移位
-  i18n/               语言注册表与翻译函数；locales/ 下是各语言词表
-  components/         文档视图、工具栏、评论面板、设置与对话框
-  components/MenuBar.tsx  顶部菜单栏（键位从 keymap 现算，支持方向键与 Esc）
-  components/TabStrip.tsx 标签栏：拖动排序与键盘移位
-  components/ShortcutSettings.tsx 快捷键录制面板（设置 → 快捷键）
-  components/SourceEditor.tsx  源码编辑器（修订拦截与光标恢复都在这里）
-  components/DockSidebar.tsx  可拖动的面板组（标签、投放区、宽度调节）
-  components/ContextMenu.tsx  通用右键菜单（定位、键盘导航、关闭时机、焦点归还）
-  components/SelectionMenu.tsx 正文右键菜单：改色与内联标注
-  components/DocumentMenu.tsx 文档右键菜单：工作区列表与标签栏共用同一份条目
-  lib/keys.ts         键盘唤出右键菜单的判定（Menu 键 / Shift+F10）
-  plugins/            插件 API 类型与注册表（专注模式为内置示例）
-  data/examples.ts    示例库加载
+  lib/markdown.ts     render pipeline, source-position mapping, writing markup and comments back
+                      (including clearing highlights and text colour)
+  lib/palette.ts      highlight / text-colour swatches, rgb → hex normalisation (toolbar + right-click)
+  lib/localfs.ts      local folder: pick directory, recursive scan, read / write, handle persistence
+  lib/revision.ts     revisions: recognise ~deletion~ / <ins>insertion</ins>, math and code guards,
+                      accept / reject, and inferring revision marks from typing, backspace and paste
+  lib/highlight.ts    trimmed code-highlight plugin (common languages only; a new language must also be
+                      added to optimizeDeps.include in vite.config.ts — the language files are CJS and
+                      dev-mode white-screens without pre-bundling, which a test guards)
+  lib/export.ts       three export modes: tag mapping, colour mapping, frontmatter trimming
+  lib/fonts.ts        UI and body font stacks, font-scale bounds
+  lib/storage.ts      local document and preference storage
+  lib/layout.ts       dock layout: panel groups, moving / closing / reordering, restore from storage
+  lib/shortcuts.ts    command table and keymap: parsing, formatting, conflict detection, paused listener
+  lib/history.ts      undo / redo stacks (one per document, consecutive input merged)
+  lib/tabs.ts         tab reordering: open documents only, keyboard moves
+  i18n/               language registry and translate function; locales/ holds the key tables
+  components/         document view, toolbar, comment panel, settings and dialogs
+  components/MenuBar.tsx          top menu bar (bindings computed from the keymap, arrow keys, Esc)
+  components/TabStrip.tsx         tab strip: drag ordering and keyboard moves
+  components/ShortcutSettings.tsx shortcut recorder (Settings → Shortcuts)
+  components/SourceEditor.tsx     source editor (revision interception and caret restoration)
+  components/DockSidebar.tsx      draggable panel groups (tabs, drop zones, width adjustment)
+  components/ContextMenu.tsx      generic context menu (placement, keyboard nav, close timing, focus return)
+  components/SelectionMenu.tsx    body right-click menu: colours and inline markup
+  components/DocumentMenu.tsx     document menu shared by workspace rows and the tab strip
+  lib/keys.ts         key detection for context menus (Menu key / Shift+F10)
+  plugins/            plugin API types and registry (focus mode is the built-in example)
+  data/examples.ts    example library loading
 ```
 
-## 部署
+## Deployment
 
-`npm run build` 产出 `dist/` 纯静态文件，由 `.github/workflows/deploy.yml` 在推送到 `main` 时自动构建并发布到 GitHub Pages，无需提交构建产物。`vite.config.ts` 的 `base: './'` 使用相对路径，因此同一份构建产物也能直接放到 Vercel、Netlify 或任意子路径下托管。
+`npm run build` emits a static `dist/`. `.github/workflows/deploy.yml` builds and publishes it to GitHub Pages on every push to `main`, so build output is never committed. `base: './'` in `vite.config.ts` keeps paths relative, so the same build also works on Vercel, Netlify or any sub-path.
 
-同一次构建会并行发布到两个目标：GitHub Pages 与 Cloudflare Pages（`cloudflare` job 复用 `build` 的 `dist` 产物，凭证存于仓库 Secrets）。两份产物完全一致，互为镜像。
+A single build publishes to two targets in parallel: GitHub Pages and Cloudflare Pages (the `cloudflare` job reuses the `dist` artifact from `build`; credentials live in repository secrets). Both artifacts are identical and mirror each other.
+
+## License
+
+[MIT](LICENSE) © 2026 panwanke
