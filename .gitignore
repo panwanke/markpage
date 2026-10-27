@@ -32,8 +32,8 @@ dist-ssr
 .env
 
 # Governance tooling (ARA-lite / proj-tracker)
-# ara.yaml is the project manifest — keep it tracked (it's the ARA contract).
-# Only local action state / caches are ignored:
+# Deliberately local-only: the ARA manifest, action state and the local note dirs
+# are working material for the author, not part of the published app source.
 ara.yaml
 trace/
 logic/

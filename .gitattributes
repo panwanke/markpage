@@ -1,0 +1,19 @@
+# Normalise line endings: LF in the repository and in the working tree on every
+# platform. Without this, a Windows checkout (core.autocrlf=true) produces
+# whole-file CRLF diffs for anyone whose settings differ.
+* text=auto eol=lf
+
+# Binary assets — never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+
+# Generated or vendored content, if it ever gets staged by accident.
+package-lock.json linguist-generated=true
+dist/** linguist-generated=true
