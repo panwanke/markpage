@@ -196,6 +196,7 @@ export const enUS: Messages = {
   'editor.sourceLabel': 'Markdown source',
   'editor.liveEditing': 'Live',
   'editor.liveEditingHint': 'One continuous view: inactive lines render, the cursor line keeps its Markdown',
+  'editor.pluginLoading': 'Loading editor…',
 
   'revision.invalidRange': 'This selection crosses revision markers, or the new text contains revision markup. Adjust the selection or accept/reject the existing revisions first.',
   'revision.toggleOn': 'Turn on track changes',

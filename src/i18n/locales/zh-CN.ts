@@ -194,6 +194,7 @@ export const zhCN = {
   'editor.sourceLabel': 'Markdown 源码',
   'editor.liveEditing': '实时',
   'editor.liveEditingHint': '单一连续视图：非活动行即时排版，光标所在行显示 Markdown 标记',
+  'editor.pluginLoading': '正在加载编辑器…',
 
   'revision.invalidRange': '选区跨越修订标记，或新文字包含修订语法。请调整选区，或先接受/拒绝已有修订。',
   'revision.toggleOn': '打开修订模式',

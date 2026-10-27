@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import ShortcutSettings from './components/ShortcutSettings'
 import { createDocument, DEFAULT_SETTINGS } from './lib/storage'
@@ -266,6 +266,10 @@ describe('Obsidian Live Editing plugin', () => {
       unobserve() {}
       disconnect() {}
     })
+    // CodeMirror 会去量文本范围；jsdom 没有布局，补个最小实现免得刷无谓报错。
+    const rangeProto = Range.prototype as unknown as { getClientRects?: unknown; getBoundingClientRect?: unknown }
+    rangeProto.getClientRects ??= () => ({ length: 0, item: () => null })
+    rangeProto.getBoundingClientRect ??= () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) })
     localStorage.setItem('markpage.documents.v1', JSON.stringify([createDocument('# 标题\n\n正文', 'A')]))
     localStorage.setItem('markpage.settings.v1', JSON.stringify({
       ...DEFAULT_SETTINGS, locale: 'en-US', showComments: false, viewMode: 'continuous',
@@ -275,6 +279,17 @@ describe('Obsidian Live Editing plugin', () => {
     root = createRoot(host)
     await act(() => root!.render(<App />))
     // 插件首次同步在微任务里完成；再 flush 一次，模式回退才算落地。
+    await act(async () => { await Promise.resolve() })
+  }
+
+  // jsdom 里没有真实网络，而且这些用例用的是假定时器：先在真定时器下把懒加载的
+  // 实现求值一次。「CodeMirror 不进主包」由构建产物与浏览器验收守，这里测的是接线。
+  beforeAll(async () => {
+    await import('./plugins/obsidian-live-editing/LivePreviewEditor')
+  })
+
+  /** chunk 已求值，只差一次微任务让 Suspense 重试。 */
+  async function flushLazyEditor() {
     await act(async () => { await Promise.resolve() })
   }
 
@@ -289,7 +304,7 @@ describe('Obsidian Live Editing plugin', () => {
     const liveButton = buttonWithText('.mode-switch button', 'Live')
     expect(liveButton).toBeTruthy()
     await click(liveButton)
-    expect(host.querySelector('.live-preview-editor')).toBeTruthy()
+    await flushLazyEditor()
     expect(host.querySelector('.cm-content')?.textContent).toContain('# 标题')
     // 排版纸张与源码栏都不该同时存在：这是单一视图。
     expect(host.querySelector('.paper-page')).toBeNull()

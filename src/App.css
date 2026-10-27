@@ -666,6 +666,8 @@ body.is-resizing-columns .source-editor { pointer-events: none; }
 /* ---------- Obsidian Live Editing（插件编辑模式） ---------- */
 .editor-content.mode-plugin { background: #fff; }
 .editor-pane.is-plugin { min-width: 0; }
+/* 插件按需加载时的空档（CodeMirror 只在首次切到实时模式才下载） */
+.plugin-editor-loading { flex: 1; display: flex; align-items: center; justify-content: center; color: #94959e; font-size: calc(12px * var(--ui-scale)); }
 .live-preview-editor { flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: #fff; }
 .live-preview-editor .cm-editor { height: 100%; background: #fff; }
 .live-preview-editor .cm-scroller {

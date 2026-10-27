@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronLeft,
@@ -1442,21 +1442,25 @@ export default function App() {
             )}
             {pluginMode && (
               <div className="editor-pane is-plugin">
-                <pluginMode.component
-                  key={activeDocument.id}
-                  ref={pluginEditorRef}
-                  documentId={activeDocument.id}
-                  markdown={markdown}
-                  revisionMode={settings.revisionMode}
-                  keymap={keymap}
-                  commitEdit={commitPluginEdit}
-                  onSelection={handlePluginSelection}
-                  onCommand={(id, target) => {
-                    if (!commandEnabled(id, target)) return false
-                    executeCommand(id, target)
-                    return true
-                  }}
-                />
+                {/* 插件可以按需加载自己的实现（Live Editing 的 CodeMirror 就是），
+                    空档期不该是一片空白。 */}
+                <Suspense fallback={<div className="plugin-editor-loading">{t('editor.pluginLoading')}</div>}>
+                  <pluginMode.component
+                    key={activeDocument.id}
+                    ref={pluginEditorRef}
+                    documentId={activeDocument.id}
+                    markdown={markdown}
+                    revisionMode={settings.revisionMode}
+                    keymap={keymap}
+                    commitEdit={commitPluginEdit}
+                    onSelection={handlePluginSelection}
+                    onCommand={(id, target) => {
+                      if (!commandEnabled(id, target)) return false
+                      executeCommand(id, target)
+                      return true
+                    }}
+                  />
+                </Suspense>
               </div>
             )}
             {mode !== 'rendered' && !pluginMode && (
