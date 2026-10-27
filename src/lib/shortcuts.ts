@@ -13,6 +13,9 @@ export type CommandGroup = 'file' | 'edit' | 'format' | 'revision' | 'view' | 't
 export type CommandId =
   | 'file.new'
   | 'file.import'
+  | 'file.openFolder'
+  | 'file.openRecent'
+  | 'file.disconnectFolder'
   | 'file.exportDirect'
   | 'file.exportClean'
   | 'file.exportCustom'
@@ -57,6 +60,10 @@ export interface CommandDefinition {
 export const COMMANDS: readonly CommandDefinition[] = [
   { id: 'file.new', group: 'file', labelKey: 'cmd.new', defaultBinding: 'Mod+Alt+N' },
   { id: 'file.import', group: 'file', labelKey: 'cmd.import', defaultBinding: 'Mod+Alt+O' },
+  // 工作空间命令默认不绑键位：打开文件夹属于低频重操作，抢走组合键不如留在菜单里。
+  { id: 'file.openFolder', group: 'file', labelKey: 'cmd.openFolder', defaultBinding: '' },
+  { id: 'file.openRecent', group: 'file', labelKey: 'cmd.openRecent', defaultBinding: '' },
+  { id: 'file.disconnectFolder', group: 'file', labelKey: 'cmd.disconnectFolder', defaultBinding: '' },
   { id: 'file.exportDirect', group: 'file', labelKey: 'cmd.exportDirect', defaultBinding: 'Mod+S' },
   { id: 'file.exportClean', group: 'file', labelKey: 'cmd.exportClean', defaultBinding: 'Mod+Shift+S' },
   { id: 'file.exportCustom', group: 'file', labelKey: 'cmd.exportCustom', defaultBinding: 'Mod+Alt+S' },
@@ -299,7 +306,8 @@ export function isShortcutCapturing() { return capturing }
  * 撤销、删除、加粗这类交给浏览器原生行为，拦截反而会把内容弄乱。
  */
 export const ALLOWED_WHILE_TYPING = new Set<CommandId>([
-  'file.new', 'file.import', 'file.exportDirect', 'file.exportClean', 'file.exportCustom',
+  'file.new', 'file.import', 'file.openFolder', 'file.openRecent', 'file.disconnectFolder',
+  'file.exportDirect', 'file.exportClean', 'file.exportCustom',
   'file.print', 'file.settings', 'revision.toggle', 'help.shortcuts',
   'view.rendered', 'view.split', 'view.source', 'view.paged', 'view.continuous',
   'view.sidebar', 'view.comments', 'view.focus',

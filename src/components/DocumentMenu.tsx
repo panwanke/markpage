@@ -25,15 +25,15 @@ interface DocumentMenuProps {
   x: number
   y: number
   document: MarkdownDocument
-  /** 是否已连上本地文件夹：没连上就置灰「保存到磁盘」。 */
-  folderConnected: boolean
+  /** 是否已连上工作空间：没连上就置灰「保存到磁盘」。 */
+  workspaceConnected: boolean
   actions: DocumentMenuActions
   onClose: () => void
 }
 
-export default function DocumentMenu({ x, y, document, folderConnected, actions, onClose }: DocumentMenuProps) {
+export default function DocumentMenu({ x, y, document, workspaceConnected, actions, onClose }: DocumentMenuProps) {
   const { t } = useI18n()
-  const { id, open, localPath } = document
+  const { id, open, binding } = document
   const name = document.name.trim() || t('document.untitled')
 
   const entries: MenuEntry[] = [
@@ -46,10 +46,10 @@ export default function DocumentMenu({ x, y, document, folderConnected, actions,
       id: 'save-to-disk',
       label: t('workspace.saveToDisk'),
       icon: <Save size={15} />,
-      disabled: !folderConnected,
+      disabled: !workspaceConnected,
       onSelect: () => actions.onSaveToDisk(id),
     },
-    ...(localPath ? [
+    ...(binding ? [
       {
         id: 'reload',
         label: t('workspace.reload'),
@@ -76,6 +76,6 @@ export default function DocumentMenu({ x, y, document, folderConnected, actions,
   ]
 
   return (
-    <ContextMenu x={x} y={y} title={t('workspace.menu')} subtitle={localPath ?? name} entries={entries} onClose={onClose} />
+    <ContextMenu x={x} y={y} title={t('workspace.menu')} subtitle={binding?.path ?? name} entries={entries} onClose={onClose} />
   )
 }

@@ -623,3 +623,93 @@ body.is-resizing-columns .source-editor { pointer-events: none; }
 @media (max-width: 1180px) {
   .menubar { display: none; }
 }
+
+/* ---------- 工作空间：最近打开 / 磁盘状态 / 写盘冲突 ---------- */
+.workspace-dialog { width: min(780px, 94vw); max-height: min(78vh, 720px); display: flex; flex-direction: column; }
+.workspace-dialog-head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 18px 14px; border-bottom: 1px solid #f0eff5; }
+.workspace-dialog-head .dialog-heading { flex: 1; min-width: 0; }
+.workspace-dialog-actions { display: flex; align-items: center; gap: 6px; }
+.workspace-dialog-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1.25fr; gap: 1px; background: #f0eff5; overflow: hidden; }
+.recent-column { min-height: 0; padding: 12px 10px; background: #fff; overflow-y: auto; }
+.recent-column h3 { margin: 0 0 8px; padding-left: 6px; color: #9a96a4; font-size: calc(10px * var(--ui-scale)); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.recent-list { display: flex; flex-direction: column; gap: 2px; }
+.recent-item { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
+.recent-item:hover { background: #f7f5ff; }
+.recent-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 8px; padding: 7px 6px; color: #4a4a55; text-align: left; }
+.recent-main > svg { margin-top: 2px; flex: 0 0 auto; color: #8f8a9c; }
+.recent-main > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.recent-main strong { font-size: calc(12px * var(--ui-scale)); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent-main small { color: #9b97a5; font-size: calc(10px * var(--ui-scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent-main em { margin-left: 6px; padding: 0 5px; border-radius: 20px; background: #efecfb; color: #6b5bb8; font-size: calc(9px * var(--ui-scale)); font-style: normal; }
+.recent-main em.is-warning { background: #fdf0e3; color: #a4651f; }
+.recent-item.is-current .recent-main strong { color: var(--accent); }
+.recent-remove { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 6px; color: #b3aebb; opacity: 0; }
+.recent-item:hover .recent-remove, .recent-remove:focus-visible { opacity: 1; }
+.recent-remove:hover { background: #fdeceb; color: #b3261e; }
+.recent-empty { margin: 4px 6px; color: #a5a1ad; font-size: calc(11px * var(--ui-scale)); }
+.workspace-dialog-foot { display: flex; align-items: center; gap: 6px; padding: 9px 18px; border-top: 1px solid #f0eff5; color: #9b97a5; font-size: calc(10px * var(--ui-scale)); }
+
+/* 磁盘状态与缓存状态分开：已保存到浏览器不等于已写进文件。 */
+.disk-state { padding: 1px 6px; border-radius: 20px; background: #f1f0f5; color: #8b8798; font-size: calc(9.5px * var(--ui-scale)); white-space: nowrap; }
+.disk-state.is-clean { background: #e8f6ee; color: #2f7a53; }
+.disk-state.is-pending, .disk-state.is-writing { background: #fdf4e3; color: #9a6a1c; }
+.disk-state.is-readonly { background: #f0eef7; color: #7a7588; }
+.disk-state.is-error, .disk-state.is-conflict { background: #fdeceb; color: #b3261e; }
+.disk-state.is-conflict { font-weight: 600; }
+.document-list-item .disk-state { display: inline-block; margin-top: 3px; }
+.dialog-icon.is-warning { background: #fdf0e3; color: #a4651f; }
+.conflict-dialog { width: min(460px, 92vw); padding: 18px; }
+.conflict-body { margin: 14px 0 0; color: #5f5c69; font-size: calc(12px * var(--ui-scale)); line-height: 1.7; }
+.conflict-note { margin: 8px 0 0; padding: 8px 10px; border-radius: 7px; background: #faf7f2; color: #8a7a63; font-size: calc(11px * var(--ui-scale)); }
+.local-file-empty.is-warning { color: #b3261e; }
+
+/* ---------- Obsidian Live Editing（插件编辑模式） ---------- */
+.editor-content.mode-plugin { background: #fff; }
+.editor-pane.is-plugin { min-width: 0; }
+.live-preview-editor { flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: #fff; }
+.live-preview-editor .cm-editor { height: 100%; background: #fff; }
+.live-preview-editor .cm-scroller {
+  padding: 34px max(28px, calc((100% - 820px) / 2)) 120px;
+  font-family: var(--doc-font);
+  font-size: calc(15px * var(--ui-scale));
+  line-height: 1.85;
+  color: #33323c;
+}
+.live-preview-editor .cm-content { caret-color: var(--accent); }
+.live-preview-editor .cm-line { padding: 0 2px; }
+.live-preview-editor .cm-activeLine { background: #faf9ff; }
+.live-preview-editor .cm-selectionBackground,
+.live-preview-editor .cm-focused .cm-selectionBackground { background: #e7e1ff; }
+
+/* 装饰层：非活动行只留排版结果 */
+.cm-live-heading { font-weight: 700; color: #26242f; font-size: 1.18em; line-height: 1.5; }
+.cm-live-strong { font-weight: 700; color: #23212c; }
+.cm-live-em { font-style: italic; }
+.cm-live-strike { text-decoration: line-through; color: #8d8a97; }
+.cm-live-code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #f3f1f8;
+  color: #6b4fb8;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .92em;
+}
+.cm-live-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.cm-live-quote { padding-left: 10px; border-left: 3px solid #ddd7f2; color: #6a6675; font-style: italic; }
+.cm-live-list { color: #3b3944; }
+
+/* 插件启停按钮 */
+.plugin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 9px;
+  border: 1px solid #e2ddf1;
+  border-radius: 8px;
+  background: #fff;
+  color: #6b6480;
+  font-size: calc(10px * var(--ui-scale));
+  white-space: nowrap;
+}
+.plugin-toggle:hover { border-color: #c8bfe9; color: var(--accent); }
+.plugin-toggle.is-on { border-color: #d8e9df; background: #edf7f1; color: #438464; }

@@ -5,6 +5,7 @@ import {
   addComment,
   applyInlineFormat,
   deleteComment,
+  findCommentAnchorRange,
   getCommentThreads,
   getPageConfig,
   parseMarkdown,
@@ -225,5 +226,21 @@ describe('评论完整生命周期', () => {
     expect(getCommentThreads(next)).toHaveLength(0)
     expect(next).toContain('这是一段需要讨论的正文。')
     expect(next).not.toContain('<comment')
+  })
+})
+
+describe('评论锚点定位', () => {
+  it('返回锚点标签在源码里的区间', () => {
+    const source = '# 测试\n\n这是一段需要讨论的正文。\n'
+    const commented = addComment(source, selectionFor(source, '需要讨论'), '作者', '一条评论')
+    const [thread] = getCommentThreads(commented)
+    const range = findCommentAnchorRange(commented, thread.id)
+    expect(range).not.toBeNull()
+    expect(commented.slice(range!.start, range!.end)).toBe(`<comment id="${thread.id}">需要讨论</comment>`)
+  })
+
+  it('锚点不存在或已删除时返回 null', () => {
+    const source = '没有评论的正文\n'
+    expect(findCommentAnchorRange(source, 'c-missing')).toBeNull()
   })
 })

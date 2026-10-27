@@ -35,16 +35,18 @@ MarkPage turns a `.md` file into a paginated, printable document you can mark up
 | Threaded comments | `<comment id="…">` anchors plus `> [!comment …]` callouts, with reply, resolve and delete |
 | Page system | Real A4 / Letter measurement and pagination, headers and footers, page numbers, font size and line height |
 | Workspace | Multiple tabs, local autosave, import `.md`, drag to open, source mode, outline, focus mode, print / PDF |
+| Folder workspaces | Open several local folders as switchable workspaces, with recent workspaces and recent files (max 20, deduplicated per workspace); a file is bound to `workspaceId + path`, so the same path in two roots never cross-writes |
 | Tab ordering | Drag tabs to reorder what is open (`Alt` + `←` / `→` also work); closed documents keep their slot |
 | Menu bar and shortcuts | The menu bar lists every command together with the key binding **currently in effect**; bindings are recorded per-row under Settings → Shortcuts, conflicts are reported on the spot instead of silently overwriting |
 | Undo / redo | One stack per document, consecutive input within 600 ms merged into a single step; undo restores a full snapshot, revision marks included |
 | Document context menu | Workspace rows and tabs share one menu: open, rename, duplicate, export `.md`, save to disk, reload from disk, copy path, unbind, close, delete. Reachable with `Shift+F10` or the Menu key; focus returns to the trigger on close |
-| Local folder | Connect a directory on disk (File System Access API), list its `.md` files, read on click and write edits back to the original file; up to 2000 files per scan, with a truncation notice at the cap |
+| Disk binding | Connect a directory on disk (File System Access API), list its `.md` files, read on click and write edits back to the original file; per-document debounced serial writes, baseline-hash conflict detection, read-only and error states shown separately from the browser autosave state; up to 2000 files per scan, with a truncation notice at the cap |
 | Dockable sidebar | Example library / workspace / outline are draggable panels: drop one onto another to merge into tabs, drop onto the bottom zone to split into a new group; closable, resizable, collapsible; layout persisted |
 | Internationalisation | Chinese / English with instant switching; one flat key table per language, adding a language means adding one file and registering it, and type checking guarantees no missing keys |
 | Appearance | UI font family and scale (115% by default, sidebar, status bar and comment panel scale with it), body font family; saved locally |
 | Three export modes | **Direct** takes everything as-is; **clean** strips comment anchors, comment blocks and highlight colours; **custom** maps colours to your own classes / inline styles, with live preview |
-| Plugin API | Command, renderer, document-access and lifecycle APIs reserved (third-party installation not open yet) |
+| Plugin API | Command, renderer, editor-mode, document-access and lifecycle APIs (API 1.1); built-in plugins can be switched on and off in Settings → Plugins, and disabling one removes its commands, renderers and editor modes |
+| Live editing | Optional built-in plugin: a single continuous CodeMirror 6 view that hides Markdown markers on non-active lines and shows them on the cursor line; Markdown stays the single source of truth, IME-safe, off by default |
 
 Page setup is written into the YAML frontmatter; user name, view toggles, language, sidebar layout and appearance (font / scale) live in browser storage. UI scale is applied through the `--ui-scale` CSS variable, sidebar and comment-panel widths follow `--ui-width` (relative to the 115% default), and body text uses `--doc-font`, so app chrome never interferes with the document's own font size and line height.
 
@@ -104,15 +106,20 @@ Three entry points, one document model; the only difference is where the content
 
 Chromium also returns a real handle on drop (`getAsFileSystemHandle()`), so a dropped file binds to disk and edits are written back, exactly like a file from the local folder; **dropping a directory connects it as a working directory**. Without handle support (Firefox / Safari) the content is copied into the browser instead.
 
-**Local folder**: the folder button in the workspace panel opens the system directory picker, searches up to four levels deep for Markdown, and skips `node_modules`, `.git`, `.obsidian` and similar. Once a file is opened it is bound: source edits, markup and comments are written back after 600 ms, a disk icon appears next to the workspace entry, and the matching row is highlighted in the folder listing.
+**Folder workspaces**: the file menu opens a system directory picker (`Open Folder…`), and every folder you open is remembered as a workspace you can switch back to (`Open Recent…`). The picker searches up to four levels deep for Markdown and skips `node_modules`, `.git`, `.obsidian` and similar. Opening a file binds it to `workspaceId + path`, so `notes/index.md` in two different roots are two different files and never write into each other.
 
-- A scan collects at most 2000 files (Obsidian vaults routinely hold thousands of notes and rendering them all would freeze the UI); hitting the cap reports "showing the first N". While scanning the panel says it is reading the folder.
-- A failed scan (directory moved, permission revoked) leaves no half-connected state: the handle is removed from IndexedDB and the reason is reported.
-- The document context menu has four disk actions: **save to disk** (write into the connected directory and bind), **reload from disk** (use it when an external editor changed the file), **copy file path**, **unbind**.
-- Directory handles are stored in IndexedDB and restored on the next page load, but write permission is only **queried** at that point, not requested: when it has expired the panel shows an "authorise writing" button.
-- Disconnecting a folder cancels pending write timers and clears the bindings that belong to that directory (individually dropped files are unaffected) — otherwise the disk icon would lie.
-- Only Chromium (Chrome / Edge) supports this API. In other browsers the folder button suggests Import instead of failing silently.
-- A failed write (permission revoked, file deleted) reports the problem and keeps the browser copy; the body text is never lost.
+- One workspace is mounted at a time. Switching first flushes pending writes; if a write fails you choose between retrying, keeping the browser copy and switching anyway, or cancelling.
+- Recent workspaces and up to 20 recent files (across workspaces, deduplicated by `workspaceId + path`) are listed in the same dialog. Jumping to a file from another workspace switches the root first, then opens it.
+- A scan collects at most 2000 files (Obsidian vaults routinely hold thousands of notes and rendering them all would freeze the UI); hitting the cap reports "showing the first N".
+- Directory handles live in IndexedDB and are restored on the next page load, but write permission is only **queried** at that point, not requested: when it has expired the panel shows an "authorise writing" button. A read-only root shows a read-only state instead of silently failing.
+- Edits are written back per document after a 600 ms debounce, one write at a time per document. A failed write (permission revoked, file deleted) keeps the browser copy and reports it; body text is never lost.
+- Before overwriting, the write compares the file against the stored baseline hash. If another editor changed the file in the meantime you get a conflict dialog: adopt the disk version, or keep your changes as a `-conflict` copy. Nothing is overwritten silently.
+- Saving a document whose name already exists picks `name-2.md` instead of clobbering the existing file.
+- Disconnecting a workspace keeps its recent entry and your documents; removing it from the recent list deletes only the stored handle and metadata, never files on disk.
+- Only Chromium (Chrome / Edge) supports this API. In other browsers the folder entry suggests Import instead of failing silently.
+
+**Obsidian-style live editing** ships as a built-in plugin (`markpage.obsidian-live-editing`), **off by default**; enable it under Settings → Plugins and a fourth editor mode appears next to rendered / split / source. It is one continuous CodeMirror 6 view where non-active lines render headings, bold, italics, strikethrough, links, lists and quotes without their markers, while the line under the cursor shows the raw Markdown so you can edit the markup in place. Frontmatter, raw HTML, code blocks and complex math stay as source on purpose — no lossy round trip. Markdown remains the single source of truth: every keystroke goes through the same `commitEdit` path as the source editor, so revisions, undo history, comments, formatting toolbar and disk writes all behave identically. IME composition is deferred until the candidate is committed, and disabling the plugin falls back to the rendered view without touching the text.
+
 
 ## Revision mode
 
@@ -201,7 +208,9 @@ src/
   lib/markdown.ts     render pipeline, source-position mapping, writing markup and comments back
                       (including clearing highlights and text colour)
   lib/palette.ts      highlight / text-colour swatches, rgb → hex normalisation (toolbar + right-click)
-  lib/localfs.ts      local folder: pick directory, recursive scan, read / write, handle persistence
+  lib/localfs.ts      local folders: pick directory, recursive scan, read / write, permissions, handle persistence
+  lib/workspace-store.ts  recent workspaces and recent files: normalise, dedupe, sort, 20-entry cap
+  lib/hash.ts         synchronous content hash for the disk baseline (conflict detection)
   lib/revision.ts     revisions: recognise ~deletion~ / <ins>insertion</ins>, math and code guards,
                       accept / reject, and inferring revision marks from typing, backspace and paste
   lib/highlight.ts    trimmed code-highlight plugin (common languages only; a new language must also be
@@ -224,8 +233,12 @@ src/
   components/ContextMenu.tsx      generic context menu (placement, keyboard nav, close timing, focus return)
   components/SelectionMenu.tsx    body right-click menu: colours and inline markup
   components/DocumentMenu.tsx     document menu shared by workspace rows and the tab strip
+  components/WorkspaceDialog.tsx  recent workspaces and recent files
+  components/ConflictDialog.tsx   disk vs browser conflict: adopt disk or save a copy
+  hooks/useWorkspace.ts    mounted workspace session: scan, permissions, per-document write queue, conflicts
+  hooks/useBuiltinPlugins.ts  built-in plugin activation and registry lifecycle
   lib/keys.ts         key detection for context menus (Menu key / Shift+F10)
-  plugins/            plugin API types and registry (focus mode is the built-in example)
+  plugins/            plugin API types and registry; obsidian-live-editing/ is the CodeMirror live preview
   data/examples.ts    example library loading
 ```
 

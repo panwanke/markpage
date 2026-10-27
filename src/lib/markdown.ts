@@ -276,6 +276,19 @@ function cleanReadableText(value: string) {
     .trim()
 }
 
+/**
+ * 评论锚点在源码里的区间。
+ *
+ * 排版视图靠 DOM 里的 `data-comment-id` 定位，插件编辑器没有那份 DOM，
+ * 只能回到源码偏移 —— 这里给出区间，宿主再交给编辑器的 `revealRange`。
+ */
+export function findCommentAnchorRange(markdown: string, id: string): { start: number; end: number } | null {
+  const pattern = new RegExp(`<comment\\s+id=["']${escapeRegExp(id)}["'][^>]*>[\\s\\S]*?<\\/comment>`, 'i')
+  const match = pattern.exec(markdown)
+  if (!match || match.index === undefined) return null
+  return { start: match.index, end: match.index + match[0].length }
+}
+
 export function getCommentThreads(markdown: string, missingAnchor = '未找到原文锚点'): CommentThread[] {
   const threads: CommentThread[] = []
   for (const match of markdown.matchAll(commentPattern())) {

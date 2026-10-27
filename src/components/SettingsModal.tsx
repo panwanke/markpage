@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Braces, Check, FileCog, Keyboard, Languages, LayoutPanelLeft, Palette, Puzzle, RotateCcw, Type, UserRound, X } from 'lucide-react'
 import { useI18n } from '../i18n'
 import type { MessageKey } from '../i18n'
+import { FOCUS_MODE_PLUGIN_ID, OBSIDIAN_LIVE_EDITING_PLUGIN_ID } from '../plugins/ids'
 import { DOC_FONTS, UI_FONTS, UI_SCALE_MAX, UI_SCALE_MIN } from '../lib/fonts'
 import { useEscape } from '../lib/useEscape'
 import type { Keymap } from '../lib/shortcuts'
@@ -16,6 +17,8 @@ interface SettingsModalProps {
   uiScale: number
   docFont: string
   keymap: Keymap
+  /** 内置插件清单：由宿主从注册表派生，启停状态即注册表真实状态。 */
+  plugins: Array<{ id: string; name: string; description: string; version: string; enabled: boolean }>
   /** 打开时停在哪个标签页，帮助菜单的「快捷键…」靠它直接落到快捷键面板。 */
   initialTab?: SettingsTab
   onUserName: (name: string) => void
@@ -23,6 +26,7 @@ interface SettingsModalProps {
   onAppearance: (patch: { uiFont?: string; uiScale?: number; docFont?: string }) => void
   onKeymap: (keymap: Keymap) => void
   onConfig: (patch: Partial<PageConfig>) => void
+  onTogglePlugin: (id: string, enabled: boolean) => void
   onResetLayout: () => void
   onClose: () => void
 }
@@ -39,6 +43,12 @@ const SCALE_PRESETS: { value: number; labelKey: MessageKey }[] = [
 
 const PREVIEW_KEYS: MessageKey[] = ['brand.name', 'sidebar.examples', 'sidebar.workspace', 'sidebar.outline', 'status.saved', 'settings.appearance.previewWords']
 
+/** 内置插件的本地化文案：插件自带的 name / description 只作兜底。 */
+const PLUGIN_TEXT: Record<string, { name: MessageKey; description: MessageKey }> = {
+  [FOCUS_MODE_PLUGIN_ID]: { name: 'settings.plugins.focusMode', description: 'settings.plugins.focusModeDesc' },
+  [OBSIDIAN_LIVE_EDITING_PLUGIN_ID]: { name: 'settings.plugins.liveEditing', description: 'settings.plugins.liveEditingDesc' },
+}
+
 // 构建期注入；在 vitest / 未走 vite 的环境里没有这个全局，退化成 dev 而不是抛错。
 const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'
 
@@ -50,12 +60,14 @@ export default function SettingsModal({
   uiScale,
   docFont,
   keymap,
+  plugins,
   initialTab = 'general',
   onUserName,
   onLocale,
   onAppearance,
   onKeymap,
   onConfig,
+  onTogglePlugin,
   onResetLayout,
   onClose,
 }: SettingsModalProps) {
@@ -195,9 +207,32 @@ export default function SettingsModal({
           </>}
           {tab === 'plugins' && <>
             <div className="settings-title"><h2>{t('settings.plugins.title')}</h2><p>{t('settings.plugins.hint')}</p></div>
-            <div className="plugin-hero"><span><Puzzle size={26} /></span><div><strong>Plugin API 1.0</strong><p>{t('settings.plugins.api')}</p></div></div>
-            <div className="settings-section"><h3>{t('settings.plugins.builtin')}</h3><div className="plugin-row"><span className="plugin-icon">{t('settings.plugins.focusMode').slice(0, 1)}</span><div><strong>{t('settings.plugins.focusMode')}</strong><p>markpage.focus-mode · v1.0.0</p></div><span className="status-pill"><Check size={12} /> {t('settings.plugins.active')}</span></div></div>
-            <div className="settings-section"><h3>{t('settings.plugins.extensions')}</h3><div className="api-tags"><span>registerCommand</span><span>registerRenderer</span><span>getDocument</span><span>lifecycle.dispose</span></div></div>
+            <div className="plugin-hero"><span><Puzzle size={26} /></span><div><strong>Plugin API 1.1</strong><p>{t('settings.plugins.api')}</p></div></div>
+            <div className="settings-section">
+              <h3>{t('settings.plugins.builtin')}</h3>
+              {plugins.map((plugin) => {
+                const text = PLUGIN_TEXT[plugin.id]
+                const name = text ? t(text.name) : plugin.name
+                return (
+                  <div className="plugin-row" key={plugin.id}>
+                    <span className="plugin-icon">{name.slice(0, 1)}</span>
+                    <div>
+                      <strong>{name}</strong>
+                      <p>{plugin.id} · v{plugin.version}</p>
+                      <p>{text ? t(text.description) : plugin.description}</p>
+                    </div>
+                    <button
+                      className={`plugin-toggle ${plugin.enabled ? 'is-on' : ''}`}
+                      aria-pressed={plugin.enabled}
+                      onClick={() => onTogglePlugin(plugin.id, !plugin.enabled)}
+                    >
+                      {plugin.enabled ? <><Check size={12} />{t('settings.plugins.active')}</> : t('settings.plugins.enable')}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="settings-section"><h3>{t('settings.plugins.extensions')}</h3><div className="api-tags"><span>registerCommand</span><span>registerRenderer</span><span>registerEditorMode</span><span>getDocument</span><span>lifecycle.dispose</span></div></div>
           </>}
           <div className="settings-bottom"><span>{t('settings.autosave')}</span><button className="primary-button" onClick={onClose}>{t('settings.done')}</button></div>
         </div>

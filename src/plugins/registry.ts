@@ -1,52 +1,135 @@
-import type { MarkPagePlugin, MarkPagePluginAPI, PluginCommand, PluginRendererContext } from './types'
+import type {
+  MarkPagePlugin,
+  MarkPagePluginAPI,
+  PluginCommand,
+  PluginEditorMode,
+  PluginRendererContext,
+} from './types'
 import { PLUGIN_API_VERSION } from './types'
 import type { Root } from 'hast'
 
 type Renderer = (node: Root, context: PluginRendererContext) => Root
 
+interface PluginRecord {
+  commands: Set<string>
+  renderers: Set<string>
+  editorModes: Set<string>
+  disposers: Array<() => void>
+  cleanup?: () => void
+}
+
+/**
+ * 插件注册表：命令、渲染器与编辑模式都按插件归属记账。
+ *
+ * 停用一个插件必须把它注册过的东西全部摘掉 —— 残留的按钮、过期组件或事件监听
+ * 比「插件没生效」更难查。版本号在每次变更时自增，宿主据此重渲染。
+ */
 export class PluginRegistry {
   private commands = new Map<string, PluginCommand>()
   private renderers = new Map<string, Renderer>()
-  private disposers: Array<() => void> = []
+  private editorModes = new Map<string, PluginEditorMode>()
+  private plugins = new Map<string, PluginRecord>()
+  private listeners = new Set<() => void>()
+  private version = 0
+
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+
+  getVersion = () => this.version
+
+  private bump() {
+    this.version += 1
+    this.listeners.forEach((listener) => listener())
+  }
+
+  isActive(pluginId: string) {
+    return this.plugins.has(pluginId)
+  }
 
   activate(plugin: MarkPagePlugin, getDocument: MarkPagePluginAPI['getDocument']) {
+    if (this.plugins.has(plugin.id)) return
+    const record: PluginRecord = {
+      commands: new Set(),
+      renderers: new Set(),
+      editorModes: new Set(),
+      disposers: [],
+    }
     const api: MarkPagePluginAPI = {
       version: PLUGIN_API_VERSION,
       registerCommand: (command) => {
         this.commands.set(command.id, command)
-        return () => this.commands.delete(command.id)
+        record.commands.add(command.id)
+        const dispose = () => {
+          this.commands.delete(command.id)
+          record.commands.delete(command.id)
+        }
+        record.disposers.push(dispose)
+        return dispose
       },
       registerRenderer: (tagName, renderer) => {
         this.renderers.set(tagName, renderer)
-        return () => this.renderers.delete(tagName)
+        record.renderers.add(tagName)
+        const dispose = () => {
+          this.renderers.delete(tagName)
+          record.renderers.delete(tagName)
+        }
+        record.disposers.push(dispose)
+        return dispose
+      },
+      registerEditorMode: (mode) => {
+        this.editorModes.set(mode.pluginId, mode)
+        record.editorModes.add(mode.pluginId)
+        const dispose = () => {
+          this.editorModes.delete(mode.pluginId)
+          record.editorModes.delete(mode.pluginId)
+        }
+        record.disposers.push(dispose)
+        return dispose
       },
       getDocument,
     }
-    const dispose = plugin.activate(api)
-    if (typeof dispose === 'function') this.disposers.push(dispose)
+    const cleanup = plugin.activate(api)
+    if (typeof cleanup === 'function') record.cleanup = cleanup
+    this.plugins.set(plugin.id, record)
+    this.bump()
+  }
+
+  /** 停用：先跑插件自己的 cleanup，再兜底摘掉它注册的一切。 */
+  deactivate(pluginId: string) {
+    const record = this.plugins.get(pluginId)
+    if (!record) return
+    try {
+      record.cleanup?.()
+    } catch {
+      // 插件的清理代码出错不该让宿主卡住，后面还有兜底摘除。
+    }
+    record.disposers.forEach((dispose) => dispose())
+    record.commands.forEach((id) => this.commands.delete(id))
+    record.renderers.forEach((tag) => this.renderers.delete(tag))
+    record.editorModes.forEach((id) => this.editorModes.delete(id))
+    this.plugins.delete(pluginId)
+    this.bump()
   }
 
   listCommands() {
     return Array.from(this.commands.values())
   }
 
+  listEditorModes() {
+    return Array.from(this.editorModes.values())
+  }
+
+  getEditorMode(pluginId: string) {
+    return this.editorModes.get(pluginId)
+  }
+
   dispose() {
-    this.disposers.forEach((dispose) => dispose())
+    for (const pluginId of [...this.plugins.keys()]) this.deactivate(pluginId)
     this.commands.clear()
     this.renderers.clear()
+    this.editorModes.clear()
+    this.bump()
   }
-}
-
-export const focusModePlugin: MarkPagePlugin = {
-  id: 'markpage.focus-mode',
-  name: '专注模式',
-  version: '1.0.0',
-  description: '内置 API 示例：通过命令注册表扩展应用行为。',
-  activate: (api) => {
-    api.registerCommand({
-      id: 'focus-mode.toggle',
-      title: '切换专注模式',
-      run: () => window.dispatchEvent(new CustomEvent('markpage:focus-mode')),
-    })
-  },
 }

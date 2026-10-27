@@ -46,6 +46,7 @@ import {
   addComment,
   applyInlineFormat,
   deleteComment,
+  findCommentAnchorRange,
   getCommentThreads,
   getMarkdownStats,
   getOutline,
@@ -84,26 +85,23 @@ import {
 } from './lib/storage'
 import { createDefaultLayout, toggleSidebar } from './lib/layout'
 import {
-  clearFolderHandle,
-  createLocalFile,
   ensureFileWritePermission,
   handlesFromTransfer,
-  hasWritePermission,
-  loadFolderHandle,
-  pickDirectory,
-  readLocalFile,
-  requestWritePermission,
-  sanitizeFileName,
-  saveFolderHandle,
-  scanDirectory,
-  supportsDirectoryPicker,
+  isSameEntry,
+  loadHandle,
+  readLocalFileWithInfo,
   titleFromPath,
-  writeLocalFile,
 } from './lib/localfs'
-import { MARKDOWN_EXTENSION as OPENABLE_EXTENSION, type LocalFileEntry } from './lib/localfs'
-import { PluginRegistry } from './plugins/registry'
-import { focusModePlugin } from './plugins/registry'
+import { MARKDOWN_EXTENSION as OPENABLE_EXTENSION } from './lib/localfs'
+import { hashContent } from './lib/hash'
+import { useWorkspace } from './hooks/useWorkspace'
+import { useBuiltinPlugins } from './hooks/useBuiltinPlugins'
+import WorkspaceDialog from './components/WorkspaceDialog'
+import ConflictDialog from './components/ConflictDialog'
+import { OBSIDIAN_LIVE_EDITING_PLUGIN_ID } from './plugins/ids'
+import type { PluginEditorHandle } from './plugins/types'
 import { useI18n } from './i18n'
+import type { MessageKey } from './i18n'
 import {
   ALLOWED_WHILE_TYPING,
   COMMANDS,
@@ -119,6 +117,7 @@ import { createHistory, pushHistory, redoHistory, undoHistory } from './lib/hist
 import type { DocumentHistory } from './lib/history'
 import { moveTab, reorderOpenDocuments, shiftTab } from './lib/tabs'
 import type {
+  DiskState,
   EditorMode,
   InlineFormat,
   MarkdownDocument as MarkdownDoc,
@@ -126,7 +125,18 @@ import type {
   SelectionMenuRequest,
   SelectionSnapshot,
 } from './types'
+import { isPluginEditorMode, pluginEditorMode } from './types'
 import './App.css'
+
+/** 磁盘状态 → 文案。缓存状态（saveState）与磁盘状态必须分开显示。 */
+const DISK_STATE_LABELS: Record<DiskState, MessageKey> = {
+  clean: 'localfs.diskClean',
+  pending: 'localfs.diskPending',
+  writing: 'localfs.diskWriting',
+  readonly: 'localfs.diskReadonly',
+  error: 'localfs.diskError',
+  conflict: 'localfs.diskConflict',
+}
 
 export default function App() {
   const { t, setLocale: changeLocale } = useI18n()
@@ -134,11 +144,13 @@ export default function App() {
   const [settings, setSettings] = useState(loadSettings)
   const [activeId, setActiveId] = useState('')
   const [selection, setSelection] = useState<SelectionSnapshot | null>(null)
-  const [selectionOrigin, setSelectionOrigin] = useState<'rendered' | 'source'>('rendered')
+  const [selectionOrigin, setSelectionOrigin] = useState<'rendered' | 'source' | 'extension'>('rendered')
   const sourceEditorRef = useRef<SourceEditorHandle>(null)
+  /** 插件编辑器的句柄：外部改写后把 caret 还回去。 */
+  const pluginEditorRef = useRef<PluginEditorHandle>(null)
   const [selectionMenu, setSelectionMenu] = useState<SelectionMenuRequest | null>(null)
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
-  const [modal, setModal] = useState<'settings' | 'comment' | 'export' | 'revision' | null>(null)
+  const [modal, setModal] = useState<'settings' | 'comment' | 'export' | 'revision' | 'workspace' | null>(null)
   const [revisionPopover, setRevisionPopover] = useState<{ mark: RevisionMark; top: number; left: number } | null>(null)
   const [saveState, setSaveState] = useState<'saving' | 'saved' | 'error'>('saved')
   const [toast, setToast] = useState('')
@@ -147,8 +159,6 @@ export default function App() {
   const [activePage, setActivePage] = useState(1)
   const [toolbarLeft, setToolbarLeft] = useState(0)
   const [splitRatio, setSplitRatio] = useState(settings.splitRatio)
-  const [folder, setFolder] = useState<{ name: string; files: LocalFileEntry[]; writable: boolean; truncated: boolean } | null>(null)
-  const [folderScanning, setFolderScanning] = useState(false)
   const [dropActive, setDropActive] = useState(false)
   /** 标签页右键菜单：与工作区列表共用同一份文档菜单，只是触发位置不同。 */
   const [tabMenu, setTabMenu] = useState<{ id: string; x: number; y: number } | null>(null)
@@ -158,15 +168,9 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const floatingToolbarRef = useRef<HTMLDivElement>(null)
   const splitDragRef = useRef<{ x: number; ratio: number; width: number } | null>(null)
-  const folderHandleRef = useRef<FileSystemDirectoryHandle | null>(null)
-  /** 拖进来的单个文件句柄：它们不属于任何已扫描的目录，写回时单独查这张表。 */
-  const extraHandlesRef = useRef(new Map<string, FileSystemFileHandle>())
   /** 拖放监听只挂一次，异步里要拿最新的文档列表，闭包里的那份会过期。 */
   const documentsRef = useRef(documents)
   useEffect(() => { documentsRef.current = documents }, [documents])
-  /** 磁盘上该文件当前的内容：内容一致就不再写盘，避免每次渲染都触发写入。 */
-  const localContentRef = useRef(new Map<string, string>())
-  const localTimerRef = useRef(new Map<string, number>())
   /** dragenter / dragleave 会在子元素之间反复触发，用计数抵消掉闪烁。 */
   const dragDepthRef = useRef(0)
 
@@ -210,10 +214,11 @@ export default function App() {
     setSelectionOrigin('rendered')
   }, [activeDocument?.id])
 
-  function restoreSourceCaret(next: string) {
-    if (selectionOrigin === 'source') {
-      sourceEditorRef.current?.restoreSelection(caretAfterEdit(markdown, next))
-    }
+  /** 外部改写后把 caret 还回来源编辑器：源码栏、插件编辑器，或排版视图（不用管）。 */
+  function restoreEditorCaret(next: string) {
+    const caret = caretAfterEdit(markdown, next)
+    if (selectionOrigin === 'source') sourceEditorRef.current?.restoreSelection(caret)
+    else if (selectionOrigin === 'extension') pluginEditorRef.current?.restoreSelection(caret)
   }
 
   useEffect(() => {
@@ -272,16 +277,9 @@ export default function App() {
   }, [config.paper])
 
   useEffect(() => {
-    const registry = new PluginRegistry()
-    registry.activate(focusModePlugin, () => activeDocument ? { id: activeDocument.id, markdown } : null)
     const toggleFocus = () => setFocusMode((value) => !value)
     window.addEventListener('markpage:focus-mode', toggleFocus)
-    return () => {
-      registry.dispose()
-      window.removeEventListener('markpage:focus-mode', toggleFocus)
-    }
-    // The example plugin only registers a command; document access is intentionally scoped.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => window.removeEventListener('markpage:focus-mode', toggleFocus)
   }, [])
 
   const notify = useCallback((message: string) => {
@@ -289,64 +287,86 @@ export default function App() {
     window.setTimeout(() => setToast(''), 2200)
   }, [])
 
-  // 上次连过的本地文件夹自动接回来：句柄存在 IndexedDB 里，写权限要用户再点一次。
-  useEffect(() => {
-    if (!supportsDirectoryPicker()) return
-    let cancelled = false
-    const restore = async () => {
-      const handle = await loadFolderHandle()
-      if (!handle || cancelled) return
-      try {
-        const writable = await hasWritePermission(handle)
-        const { entries, truncated } = await scanDirectory(handle)
-        if (cancelled) return
-        folderHandleRef.current = handle
-        setFolder({ name: handle.name, files: entries, writable, truncated })
-        if (!writable) notify(t('localfs.needPermission', { name: handle.name }))
-      } catch {
-        // 目录被删掉或权限被撤销：静默放弃，用户点「打开文件夹」重新选即可。
-        await clearFolderHandle()
-      }
-    }
-    void restore()
-    return () => { cancelled = true }
-    // 只在首次挂载时尝试恢复：notify / t 每帧都会变，不该让它反复重连文件夹。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  /**
+   * 工作空间会话：目录句柄、权限、写盘队列与冲突判定都在这里。
+   * App 仍然是文档真相的持有者，hook 只回写 binding / diskBaseline。
+   */
+  const workspace = useWorkspace({
+    getDocuments: () => documentsRef.current,
+    patchDocument: (id, patch) => setDocuments((current) => current.map((document) => (
+      document.id === id ? { ...document, ...patch } : document
+    ))),
+    replaceMarkdown: (id, markdown) => {
+      // 整篇被磁盘版本替换，旧的撤销栈不再有意义。
+      historyRef.current.delete(id)
+      setDocuments((current) => current.map((document) => (
+        document.id === id ? { ...document, markdown, updatedAt: new Date().toISOString() } : document
+      )))
+    },
+    notify,
+    t,
+  })
 
-  // 绑定到磁盘的文档改动后写回原文件；600ms 防抖让连续输入只落一次盘。
+  // 解构出稳定的回调再进依赖数组：直接写 workspace.xxx 会让 lint 把整个对象当依赖。
+  const { enqueueWrite, hasPendingWrites } = workspace
+
+  // 绑定文档的内容一变就排一次写盘：hook 内部按 documentId 防抖、串行、判冲突。
   useEffect(() => {
-    const handles = new Map<string, FileSystemFileHandle>([
-      ...(folder?.files ?? []).map((file) => [file.path, file.handle] as const),
-      ...extraHandlesRef.current,
-    ])
     documents.forEach((document) => {
-      const path = document.localPath
-      if (!path) return
-      const handle = handles.get(path)
-      if (!handle) return
-      if (localContentRef.current.get(path) === document.markdown) return
-      const pending = localTimerRef.current.get(path)
-      if (pending) window.clearTimeout(pending)
-      const timer = window.setTimeout(async () => {
-        try {
-          await writeLocalFile(handle, document.markdown)
-          localContentRef.current.set(path, document.markdown)
-          setFolder((current) => (current && !current.writable ? { ...current, writable: true } : current))
-        } catch {
-          setFolder((current) => (current && current.writable ? { ...current, writable: false } : current))
-          notify(t('localfs.writeFailed', { name: document.name || path }))
-        }
-      }, 600)
-      localTimerRef.current.set(path, timer)
+      if (document.binding) enqueueWrite(document)
     })
-  }, [documents, folder?.files, notify, t])
+  }, [documents, enqueueWrite])
 
-  // 卸载时取消挂起的写盘定时器：界面都要没了，再落盘只会写进一个没人跟踪的文件。
-  useEffect(() => () => {
-    localTimerRef.current.forEach((timer) => window.clearTimeout(timer))
-    localTimerRef.current.clear()
-  }, [])
+  const activeDiskState = activeDocument ? workspace.diskStates.get(activeDocument.id) : undefined
+  const activeConflict = activeDocument ? workspace.conflicts.get(activeDocument.id) : undefined
+  /** 当前根如果只读，最近列表里也要标出来，别让用户点了才发现打不开。 */
+  const unavailableWorkspaces = useMemo(() => {
+    const result: Record<string, boolean> = {}
+    const session = workspace.session
+    if (session && session.writePermission !== 'granted') result[session.id] = true
+    return result
+  }, [workspace.session])
+
+  // 内置插件：启停、注册表版本与编辑模式。命令与模式按钮都从这里派生。
+  const {
+    editorModes,
+    plugins: builtinPlugins,
+    activeIds: activePluginIds,
+    synced: pluginsSynced,
+  } = useBuiltinPlugins({
+    enabledPluginIds: settings.enabledPluginIds,
+    getDocument: () => (activeDocument ? { id: activeDocument.id, markdown } : null),
+  })
+
+  const pluginMode = isPluginEditorMode(mode)
+    ? editorModes.find((entry) => pluginEditorMode(entry.pluginId) === mode)
+    : undefined
+
+  // 插件被停用（或设置里留着已经失效的模式）时安全回退：清选区、卸载编辑器、正文不变。
+  useEffect(() => {
+    if (!isPluginEditorMode(mode) || !pluginsSynced) return
+    const pluginId = mode.slice('plugin:'.length)
+    if (editorModes.some((entry) => entry.pluginId === pluginId)) return
+    setSelection(null)
+    setSelectionMenu(null)
+    setSettings((current) => ({ ...current, editorMode: 'rendered' }))
+  }, [mode, editorModes, pluginsSynced])
+
+  // 页面退出前同步落一次浏览器缓存；还有没写完的磁盘改动就提醒用户。
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      try {
+        saveDocuments(documentsRef.current)
+      } catch {
+        // 存不进去也拦不住用户关页面，至少别在卸载阶段抛错。
+      }
+      if (!hasPendingWrites()) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasPendingWrites])
 
   // 浮动工具条按实测宽度收进视口：界面字号放大后它也会变宽，写死的边距会溢出屏幕。
   useLayoutEffect(() => {
@@ -378,6 +398,40 @@ export default function App() {
     writeActiveMarkdown(nextMarkdown, { name })
   }, [writeActiveMarkdown])
 
+  /**
+   * 插件编辑器的唯一写入口：修订改写、撤销栈、文档更新都在这里完成，
+   * 返回实际写入的 Markdown 与 caret —— 修订会改变长度，插件必须用返回值同步视图。
+   */
+  const commitPluginEdit = useCallback((next: string, caret: number, trackRevision: boolean) => {
+    const id = activeDocument?.id
+    if (!id) return { markdown, caret }
+    let result = next
+    let nextCaret = caret
+    if (trackRevision && settings.revisionMode && next !== markdown) {
+      const edit = trackSourceEdit(markdown, next, caret)
+      result = edit.markdown
+      nextCaret = edit.caret
+    }
+    if (result !== markdown) {
+      historyRef.current.set(id, pushHistory(historyRef.current.get(id) ?? createHistory(), markdown, Date.now()))
+      setDocuments((current) => current.map((document) => (
+        document.id === id ? { ...document, markdown: result, updatedAt: new Date().toISOString() } : document
+      )))
+    }
+    return { markdown: result, caret: nextCaret }
+  }, [activeDocument?.id, markdown, settings.revisionMode])
+
+  /** 插件里的选区：来源标成 extension，外部改写后由插件句柄恢复 caret。 */
+  const handlePluginSelection = useCallback((next: SelectionSnapshot | null) => {
+    if (!next) {
+      setSelection(null)
+      return
+    }
+    setSelection(next)
+    setSelectionOrigin('extension')
+    setSelectionMenu(null)
+  }, [])
+
   function undoDocument() {
     const id = activeDocument?.id
     if (!id) return
@@ -388,7 +442,7 @@ export default function App() {
     }
     historyRef.current.set(id, step.history)
     writeActiveMarkdown(step.markdown, { history: false })
-    restoreSourceCaret(step.markdown)
+    restoreEditorCaret(step.markdown)
     setSelection(null)
     setSelectionMenu(null)
     window.getSelection()?.removeAllRanges()
@@ -405,7 +459,7 @@ export default function App() {
     }
     historyRef.current.set(id, step.history)
     writeActiveMarkdown(step.markdown, { history: false })
-    restoreSourceCaret(step.markdown)
+    restoreEditorCaret(step.markdown)
     setSelection(null)
     setSelectionMenu(null)
     window.getSelection()?.removeAllRanges()
@@ -432,7 +486,10 @@ export default function App() {
       return
     }
     updateActiveDocument(next)
-    if (selectionOrigin === 'source') sourceEditorRef.current?.restoreSelection(caretAfterEdit(markdown, next))
+    // 就地还原 caret：源码栏与插件编辑器各自处理，排版视图不需要。
+    const caret = caretAfterEdit(markdown, next)
+    if (selectionOrigin === 'source') sourceEditorRef.current?.restoreSelection(caret)
+    else if (selectionOrigin === 'extension') pluginEditorRef.current?.restoreSelection(caret)
     notify(t('toast.formatApplied'))
   }, [activeDocument, markdown, updateActiveDocument, notify, t, selectionOrigin])
 
@@ -479,7 +536,7 @@ export default function App() {
     const next = markDeletion(markdown, target)
     if (next === markdown) return
     updateActiveDocument(next)
-    restoreSourceCaret(next)
+    restoreEditorCaret(next)
     window.getSelection()?.removeAllRanges()
     setSelection(null)
     notify(t('toast.revisionMarked'))
@@ -493,7 +550,7 @@ export default function App() {
       return
     }
     updateActiveDocument(next)
-    restoreSourceCaret(next)
+    restoreEditorCaret(next)
     window.getSelection()?.removeAllRanges()
     setSelection(null)
     setModal(null)
@@ -687,42 +744,21 @@ export default function App() {
   }
 
   /**
-   * 另存到磁盘：写进已连接的文件夹并绑定，之后改动自动写回。
-   * 已经绑过的文档直接用原路径覆盖，不另起一份。
+   * 另存到磁盘：写进当前工作空间并绑定，之后改动自动写回。
+   * 已经绑定到当前根同一路径的文档覆盖自己，其余同名文件会被改成 `名称-2.md`。
    */
   async function saveDocumentToDisk(id: string) {
     const target = documents.find((document) => document.id === id)
-    const root = folderHandleRef.current
     if (!target) return
-    if (!root) {
-      notify(t('localfs.noFolder'))
-      return
-    }
-    const path = target.localPath ?? sanitizeFileName(displayName(target))
-    try {
-      const handle = await createLocalFile(root, path, target.markdown)
-      // 扫描回来之前先自己拿着句柄，否则这 600ms 内的改动无处可写。
-      extraHandlesRef.current.set(path, handle)
-      localContentRef.current.set(path, target.markdown)
-      setDocuments((current) => current.map((document) => (
-        document.id === id ? { ...document, localPath: path, updatedAt: new Date().toISOString() } : document
-      )))
-      await refreshFolder()
-      notify(t('localfs.savedToDisk', { name: path }))
-    } catch {
-      notify(t('localfs.saveFailed'))
-    }
+    await workspace.saveToDisk(target)
   }
 
   /** 解除绑定：文档留在浏览器里，改动不再写回磁盘。 */
   function unbindDocument(id: string) {
+    workspace.releaseDocument(id)
     setDocuments((current) => current.map((document) => {
       if (document.id !== id) return document
-      const { localPath, ...rest } = document
-      if (localPath) {
-        localContentRef.current.delete(localPath)
-        extraHandlesRef.current.delete(localPath)
-      }
+      const { binding: _binding, diskBaseline: _baseline, ...rest } = document
       return rest
     }))
     notify(t('localfs.unbound'))
@@ -731,27 +767,22 @@ export default function App() {
   /** 从磁盘重新载入：外部编辑器改过文件时用它对齐，浏览器里的改动会被覆盖。 */
   async function reloadDocument(id: string) {
     const target = documents.find((document) => document.id === id)
-    const path = target?.localPath
-    if (!target || !path) return
-    const handle = extraHandlesRef.current.get(path) ?? folder?.files.find((file) => file.path === path)?.handle
-    if (!handle) return
-    let content: string
-    try {
-      content = await readLocalFile(handle)
-    } catch {
-      notify(t('localfs.readFailed', { name: path }))
-      return
-    }
-    localContentRef.current.set(path, content)
+    if (!target?.binding) return
+    const file = await workspace.readBoundFile(target)
+    if (!file) return
+    const baseline = { hash: hashContent(file.content), lastModified: file.lastModified }
     historyRef.current.delete(id)
     setDocuments((current) => current.map((document) => (
-      document.id === id ? { ...document, markdown: content, updatedAt: new Date().toISOString() } : document
+      document.id === id
+        ? { ...document, markdown: file.content, diskBaseline: baseline, updatedAt: new Date().toISOString() }
+        : document
     )))
+    workspace.markSynced(id, baseline)
     notify(t('localfs.reloaded', { name: displayName(target) }))
   }
 
   function copyDocumentPath(id: string) {
-    const path = documents.find((document) => document.id === id)?.localPath
+    const path = documents.find((document) => document.id === id)?.binding?.path
     if (!path) return
     navigator.clipboard.writeText(path)
       .then(() => notify(t('localfs.copiedPath', { path })))
@@ -835,31 +866,47 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [importFiles])
 
+  /** 之前拖过同一个文件：按句柄身份找回那篇文档，避免同一文件开成两份。 */
+  async function findExternalDocument(handle: FileSystemFileHandle, path: string) {
+    for (const document of documentsRef.current) {
+      if (document.binding?.kind !== 'external') continue
+      const known = await loadHandle<FileSystemFileHandle>(document.binding.handleKey)
+      if (known && await isSameEntry(known, handle)) return document
+      if (document.binding.path === path) return document
+    }
+    return undefined
+  }
+
   /** 拖进来的单个文件：拿得到句柄就绑成磁盘文档，改动直接写回原文件。 */
   async function openDroppedFiles(entries: { name: string; handle: FileSystemFileHandle }[]) {
     const opened: MarkdownDoc[] = []
     for (const entry of entries) {
       const path = entry.name
       let content: string
+      let lastModified = Date.now()
       try {
-        content = await readLocalFile(entry.handle)
+        const info = await readLocalFileWithInfo(entry.handle)
+        content = info.content
+        lastModified = info.lastModified
       } catch {
         notify(t('localfs.readFailed', { name: path }))
         continue
       }
-      extraHandlesRef.current.set(path, entry.handle)
-      localContentRef.current.set(path, content)
-      const existing = documentsRef.current.find((document) => document.localPath === path)
+      const baseline = { hash: hashContent(content), lastModified }
+      const existing = await findExternalDocument(entry.handle, path)
       if (existing) {
         // 之前拖过同一个文件：以磁盘上的内容为准，旧的撤销栈不再有意义。
         historyRef.current.delete(existing.id)
         setDocuments((current) => current.map((document) => document.id === existing.id
-          ? { ...document, markdown: content, open: true, updatedAt: new Date().toISOString() }
+          ? { ...document, markdown: content, open: true, diskBaseline: baseline, updatedAt: new Date().toISOString() }
           : document))
+        workspace.markSynced(existing.id, baseline)
         setActiveId(existing.id)
         continue
       }
-      opened.push({ ...createDocument(content, titleFromPath(path)), localPath: path })
+      const document = createDocument(content, titleFromPath(path))
+      const binding = await workspace.bindExternalFile(document.id, entry.handle, path)
+      opened.push({ ...document, binding, diskBaseline: baseline })
     }
     if (!opened.length) {
       if (entries.length === 1) notify(t('localfs.dropBound', { name: entries[0].name }))
@@ -872,7 +919,7 @@ export default function App() {
     // 写权限要用户点一下：拖放属于用户手势，此刻申请最自然，失败也不影响读。
     void ensureFileWritePermission(entries[entries.length - 1].handle)
     notify(opened.length === 1
-      ? t('localfs.dropBound', { name: opened[0].localPath ?? '' })
+      ? t('localfs.dropBound', { name: opened[0].binding?.path ?? '' })
       : t('toast.imported', { count: opened.length }))
   }
 
@@ -880,111 +927,100 @@ export default function App() {
    * 选一个本地文件夹：内容直接来自磁盘，改动写回原文件。
    * 扫描会读整个目录树，出错时（目录被移走 / 权限撤销）不留半连接状态。
    */
+  /** 选一个本地文件夹：内容直接来自磁盘，改动写回原文件。 */
   async function connectFolder(preset?: FileSystemDirectoryHandle | null) {
-    if (!supportsDirectoryPicker()) {
-      notify(t('localfs.unsupported'))
-      return
-    }
-    const handle = preset ?? await pickDirectory()
-    if (!handle) return
-    setFolderScanning(true)
-    try {
-      folderHandleRef.current = handle
-      await saveFolderHandle(handle)
-      const writable = await requestWritePermission(handle)
-      const { entries, truncated } = await scanDirectory(handle)
-      setFolder({ name: handle.name, files: entries, writable, truncated })
-      notify(truncated
-        ? t('localfs.truncated', { count: entries.length })
-        : t('localfs.connected', { name: handle.name, count: entries.length }))
-    } catch {
-      folderHandleRef.current = null
-      setFolder(null)
-      await clearFolderHandle()
-      notify(t('localfs.scanFailed', { name: handle.name }))
-    } finally {
-      setFolderScanning(false)
-    }
+    await workspace.openFolder(preset)
   }
 
   async function refreshFolder() {
-    const handle = folderHandleRef.current
-    if (!handle) return
-    setFolderScanning(true)
-    try {
-      const { entries, truncated } = await scanDirectory(handle)
-      setFolder((current) => (current ? { ...current, files: entries, truncated } : current))
-      notify(truncated
-        ? t('localfs.truncated', { count: entries.length })
-        : t('localfs.refreshed', { count: entries.length }))
-    } catch {
-      notify(t('localfs.scanFailed', { name: handle.name }))
-    } finally {
-      setFolderScanning(false)
-    }
+    await workspace.refresh()
   }
 
   async function disconnectFolder() {
-    // 挂起的写盘定时器一律取消：断开之后再落盘只会写进一个已经不属于我们的文件。
-    localTimerRef.current.forEach((timer) => window.clearTimeout(timer))
-    localTimerRef.current.clear()
-    folderHandleRef.current = null
-    localContentRef.current.clear()
-    await clearFolderHandle()
-    setFolder(null)
-    // 属于这个文件夹的绑定关系一并解除；拖进来的单个文件不受影响。
+    const activeWorkspaceId = workspace.session?.id
+    await workspace.disconnect()
+    if (!activeWorkspaceId) return
+    // 只解除这个工作空间的绑定；其他根与拖进来的单文件不受影响。
     setDocuments((current) => current.map((document) => {
-      if (!document.localPath || extraHandlesRef.current.has(document.localPath)) return document
-      const { localPath: _dropped, ...rest } = document
+      if (document.binding?.kind !== 'workspace' || document.binding.workspaceId !== activeWorkspaceId) return document
+      const { binding: _binding, diskBaseline: _baseline, ...rest } = document
       return rest
     }))
-    notify(t('localfs.disconnected'))
   }
 
   async function permitFolderWrite() {
-    const handle = folderHandleRef.current
-    if (!handle) return
-    const granted = await requestWritePermission(handle)
-    setFolder((current) => (current ? { ...current, writable: granted } : current))
-    notify(granted ? t('localfs.permitted') : t('localfs.denied'))
+    await workspace.permitWrite()
   }
 
-  async function openLocalFile(path: string) {
-    const entry = folder?.files.find((file) => file.path === path)
-    if (!entry) return
-    const existing = documents.find((document) => document.localPath === path)
+  /** 切换工作空间：先 flush 当前根，再关掉旧根的标签（缓存与绑定保留）。 */
+  async function switchWorkspace(workspaceId: string) {
+    if (workspace.session?.id === workspaceId) return
+    const ok = await workspace.switchWorkspace(workspaceId)
+    if (!ok) return
+    setDocuments((current) => {
+      const next = current.map((document) => (
+        document.binding?.kind === 'workspace' && document.binding.workspaceId !== workspaceId
+          ? { ...document, open: false }
+          : document
+      ))
+      // 一篇都不剩就补一篇空白，避免整个编辑区空掉。
+      return next.some((document) => document.open) ? next : [...next, createDocument()]
+    })
+    setSelection(null)
+    setSelectionMenu(null)
+  }
+
+  /** 打开工作空间里的文件；文件属于别的根时先切根再读，绝不跨根读同一个相对路径。 */
+  async function openWorkspaceFile(workspaceId: string, path: string) {
+    if (workspace.session?.id !== workspaceId) {
+      const ok = await workspace.switchWorkspace(workspaceId)
+      if (!ok) return
+    }
+    const existing = documentsRef.current.find((document) => (
+      document.binding?.kind === 'workspace'
+      && document.binding.workspaceId === workspaceId
+      && document.binding.path === path
+    ))
     if (existing?.open) {
       openDocument(existing.id)
+      workspace.recordRecentFile({ workspaceId, documentId: existing.id, path, title: displayName(existing) })
       return
     }
-    let content: string
-    try {
-      content = await readLocalFile(entry.handle)
-    } catch {
-      notify(t('localfs.readFailed', { name: entry.path }))
-      return
-    }
-    localContentRef.current.set(path, content)
+    const file = await workspace.readWorkspaceFile(workspaceId, path)
+    if (!file) return
+    const baseline = { hash: hashContent(file.content), lastModified: file.lastModified }
     if (existing) {
-      // 之前开过后来关掉了：以磁盘上的最新内容为准，而不是浏览器里的旧副本。
-      // 内容被整篇换掉，旧的撤销栈已经没有意义了。
+      // 之前开过后来关掉了：以磁盘上的最新内容为准，旧的撤销栈不再有意义。
       historyRef.current.delete(existing.id)
       setDocuments((current) => current.map((document) => document.id === existing.id
-        ? { ...document, markdown: content, open: true, updatedAt: new Date().toISOString() }
+        ? { ...document, markdown: file.content, open: true, diskBaseline: baseline, updatedAt: new Date().toISOString() }
         : document))
       setActiveId(existing.id)
+      workspace.recordRecentFile({ workspaceId, documentId: existing.id, path, title: displayName(existing) })
     } else {
-      const document: MarkdownDoc = { ...createDocument(content, entry.title), localPath: path }
+      const document: MarkdownDoc = {
+        ...createDocument(file.content, file.title),
+        binding: { kind: 'workspace', workspaceId, path },
+        diskBaseline: baseline,
+      }
       setDocuments((current) => [...current, document])
       setActiveId(document.id)
+      workspace.recordRecentFile({ workspaceId, documentId: document.id, path, title: file.title })
     }
     setSelection(null)
     setSelectionMenu(null)
-    notify(t('localfs.opened', { name: entry.title }))
+    notify(t('localfs.opened', { name: file.title }))
   }
 
   function locateComment(id: string) {
     updateSettings({ showComments: true })
+    // 插件编辑器没有纸张 DOM：改用源码区间定位，找不到锚点再退回排版视图。
+    const anchor = pluginMode ? findCommentAnchorRange(markdown, id) : null
+    if (anchor && pluginEditorRef.current?.revealRange) {
+      pluginEditorRef.current.revealRange(anchor.start, anchor.end)
+      setActiveCommentId(id)
+      return
+    }
     ensureRendered()
     setActiveCommentId(id)
     window.setTimeout(() => {
@@ -1017,12 +1053,14 @@ export default function App() {
   /** 删除选区：修订模式下记成删除修订，否则直接从源码里抹掉。 */
   function deleteSelection(target = selection) {
     if (!target || target.start === target.end) return
-    if (selectionOrigin === 'source') {
+    if (selectionOrigin !== 'rendered') {
       const plain = markdown.slice(0, target.start) + markdown.slice(target.end)
       const edit = settings.revisionMode ? trackSourceEdit(markdown, plain, target.start) : { markdown: plain, caret: target.start }
       if (edit.markdown !== markdown) {
         writeActiveMarkdown(edit.markdown)
-        sourceEditorRef.current?.restoreSelection(edit.caret)
+        // 源码栏与插件编辑器都在操作源码偏移，各自把 caret 还回去。
+        if (selectionOrigin === 'source') sourceEditorRef.current?.restoreSelection(edit.caret)
+        else pluginEditorRef.current?.restoreSelection(edit.caret)
         setSelection(null)
       }
       return
@@ -1097,6 +1135,8 @@ export default function App() {
       case 'file.exportClean':
       case 'file.exportCustom':
         return Boolean(activeDocument)
+      case 'file.disconnectFolder':
+        return Boolean(workspace.session)
       default:
         return true
     }
@@ -1106,6 +1146,9 @@ export default function App() {
     switch (id) {
       case 'file.new': newDocument(); break
       case 'file.import': fileInputRef.current?.click(); break
+      case 'file.openFolder': void connectFolder(); break
+      case 'file.openRecent': setModal('workspace'); break
+      case 'file.disconnectFolder': void disconnectFolder(); break
       case 'file.exportDirect':
         if (!activeDocument) return
         handleExport()
@@ -1211,16 +1254,18 @@ export default function App() {
         <WorkspacePanel
           documents={documents}
           activeId={activeDocument?.id ?? ''}
-          activeLocalPath={activeDocument?.localPath ?? ''}
-          folder={folder
+          activePath={activeDocument?.binding?.kind === 'workspace' ? activeDocument.binding.path : ''}
+          workspace={workspace.session
             ? {
-              name: folder.name,
-              writable: folder.writable,
-              truncated: folder.truncated,
-              scanning: folderScanning,
-              files: folder.files.map((file) => ({ path: file.path, title: file.title })),
+              name: workspace.session.name,
+              writable: workspace.session.writePermission === 'granted',
+              truncated: workspace.session.truncated,
+              scanning: workspace.session.scanning,
+              invalid: workspace.session.invalid,
+              files: workspace.session.files.map((file) => ({ path: file.path, title: file.title })),
             }
             : null}
+          diskStates={workspace.diskStates}
           onOpen={openDocument}
           onNew={newDocument}
           onRename={renameDocument}
@@ -1229,10 +1274,14 @@ export default function App() {
           onClose={closeDocument}
           onDelete={deleteDocument}
           onOpenFolder={() => void connectFolder()}
+          onOpenRecent={() => setModal('workspace')}
           onRefreshFolder={refreshFolder}
           onDisconnectFolder={disconnectFolder}
           onPermitWrite={permitFolderWrite}
-          onOpenLocalFile={openLocalFile}
+          onOpenWorkspaceFile={(path) => {
+            const workspaceId = workspace.session?.id
+            if (workspaceId) void openWorkspaceFile(workspaceId, path)
+          }}
           onSaveToDisk={saveDocumentToDisk}
           onUnbind={unbindDocument}
           onReload={reloadDocument}
@@ -1277,6 +1326,12 @@ export default function App() {
             {saveState === 'saved' ? <Check size={12} /> : <span className="saving-dot" />}
             {saveState === 'saved' ? t('save.saved') : saveState === 'saving' ? t('save.saving') : t('save.error')}
           </span>
+          {/* 缓存已保存 ≠ 已写进磁盘：绑定文档单独显示磁盘状态。 */}
+          {activeDocument.binding && activeDiskState && (
+            <span className={`disk-state is-${activeDiskState}`} title={activeDocument.binding.path}>
+              {t(DISK_STATE_LABELS[activeDiskState])}
+            </span>
+          )}
         </div>
         <div className="header-actions">
           <input ref={fileInputRef} type="file" accept=".md,.markdown,.mdown,.mkd,.txt" multiple hidden onChange={(event) => importFiles(event.target.files)} />
@@ -1325,7 +1380,7 @@ export default function App() {
             footer={(
               <div className="local-workspace">
                 <span className="workspace-indicator" />
-                <div><strong>{t('sidebar.local')}</strong><small>{t('sidebar.localHint')}</small></div>
+                <div><strong>{workspace.session?.name ?? t('sidebar.local')}</strong><small>{t('sidebar.localHint')}</small></div>
               </div>
             )}
           />
@@ -1337,6 +1392,17 @@ export default function App() {
               <button className={mode === 'rendered' ? 'active' : ''} onClick={() => switchMode('rendered')} title={t('editor.renderedHint')}><ScrollText size={15} />{t('editor.rendered')}</button>
               <button className={mode === 'split' ? 'active' : ''} onClick={() => switchMode('split')} title={t('editor.splitHint')}><Columns2 size={15} />{t('editor.split')}</button>
               <button className={mode === 'source' ? 'active' : ''} onClick={() => switchMode('source')} title={t('editor.sourceHint')}><Code2 size={15} />{t('editor.source')}</button>
+              {/* 插件注册的编辑模式：按钮完全由注册表派生，停用后自然消失。 */}
+              {editorModes.map((entry) => {
+                const value = pluginEditorMode(entry.pluginId)
+                const label = entry.pluginId === OBSIDIAN_LIVE_EDITING_PLUGIN_ID ? t('editor.liveEditing') : entry.title
+                const hint = entry.pluginId === OBSIDIAN_LIVE_EDITING_PLUGIN_ID ? t('editor.liveEditingHint') : entry.description
+                return (
+                  <button key={value} className={mode === value ? 'active' : ''} onClick={() => switchMode(value)} title={hint}>
+                    <FileDiff size={15} />{label}
+                  </button>
+                )
+              })}
             </div>
             <div className="main-format-tools">
               <FormattingToolbar disabled={!hasSelectedText} revision={revisionControls} onFormat={handleFormat} onComment={() => selection && setModal('comment')} />
@@ -1354,8 +1420,8 @@ export default function App() {
             </div>
           </div>
 
-          <div className={`editor-content mode-${mode}`}>
-            {mode !== 'source' && (
+          <div className={`editor-content mode-${pluginMode ? 'plugin' : mode}`}>
+            {mode !== 'source' && !pluginMode && (
               <div className="editor-pane">
                 <MarkdownDocument
                   markdown={markdown}
@@ -1374,7 +1440,26 @@ export default function App() {
                 />
               </div>
             )}
-            {mode !== 'rendered' && (
+            {pluginMode && (
+              <div className="editor-pane is-plugin">
+                <pluginMode.component
+                  key={activeDocument.id}
+                  ref={pluginEditorRef}
+                  documentId={activeDocument.id}
+                  markdown={markdown}
+                  revisionMode={settings.revisionMode}
+                  keymap={keymap}
+                  commitEdit={commitPluginEdit}
+                  onSelection={handlePluginSelection}
+                  onCommand={(id, target) => {
+                    if (!commandEnabled(id, target)) return false
+                    executeCommand(id, target)
+                    return true
+                  }}
+                />
+              </div>
+            )}
+            {mode !== 'rendered' && !pluginMode && (
               <>
                 {mode === 'split' && (
                   <div
@@ -1464,7 +1549,7 @@ export default function App() {
           x={tabMenu.x}
           y={tabMenu.y}
           document={tabMenuDocument}
-          folderConnected={Boolean(folder)}
+          workspaceConnected={Boolean(workspace.session)}
           actions={documentMenuActions}
           onClose={() => setTabMenu(null)}
         />
@@ -1492,6 +1577,26 @@ export default function App() {
         />
       )}
 
+      {modal === 'workspace' && <WorkspaceDialog
+        store={workspace.store}
+        activeWorkspaceId={workspace.session?.id ?? null}
+        unavailable={unavailableWorkspaces}
+        onSwitchWorkspace={(id) => { setModal(null); void switchWorkspace(id) }}
+        onOpenFile={(workspaceId, path) => { setModal(null); void openWorkspaceFile(workspaceId, path) }}
+        onRemoveWorkspace={(id) => void workspace.removeRecentWorkspace(id)}
+        onRemoveFile={(workspaceId, path) => workspace.removeRecentFile({ workspaceId, path })}
+        onOpenFolder={() => { setModal(null); void connectFolder() }}
+        onClose={() => setModal(null)}
+      />}
+      {activeConflict && activeDocument && (
+        <ConflictDialog
+          name={displayName(activeDocument)}
+          bothChanged={activeConflict.browserChanged}
+          onUseDisk={() => void workspace.resolveConflict(activeDocument.id, 'disk')}
+          onSaveCopy={() => void workspace.resolveConflict(activeDocument.id, 'copy')}
+          onClose={() => undefined}
+        />
+      )}
       {modal === 'settings' && <SettingsModal
         config={config}
         userName={settings.userName}
@@ -1500,11 +1605,23 @@ export default function App() {
         uiScale={settings.uiScale}
         docFont={settings.docFont}
         keymap={keymap}
+        plugins={builtinPlugins.map((plugin) => ({
+          id: plugin.id,
+          name: plugin.name,
+          description: plugin.description,
+          version: plugin.version,
+          enabled: activePluginIds.has(plugin.id),
+        }))}
         initialTab={settingsTab}
         onUserName={(userName) => updateSettings({ userName })}
         onLocale={(locale) => updateSettings({ locale })}
         onAppearance={(patch) => updateSettings(patch)}
         onKeymap={(next) => updateSettings({ keymap: next })}
+        onTogglePlugin={(id, enabled) => updateSettings({
+          enabledPluginIds: enabled
+            ? [...settings.enabledPluginIds.filter((item) => item !== id), id]
+            : settings.enabledPluginIds.filter((item) => item !== id),
+        })}
         onConfig={updateConfig}
         onResetLayout={() => { updateSettings({ layout: createDefaultLayout() }); notify(t('toast.layoutReset')) }}
         onClose={() => setModal(null)}

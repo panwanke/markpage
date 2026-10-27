@@ -58,24 +58,57 @@ export async function pickDirectory(): Promise<FileSystemDirectoryHandle | null>
   }
 }
 
-/** 写权限要用户点一下才算数，重新打开页面后通常需要再确认一次。 */
-export async function requestWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
+/** 权限状态：`prompt` 表示还没问过，需要用户手势才能申请。 */
+export type PermissionStatus = 'granted' | 'denied' | 'prompt'
+
+/**
+ * 只查询、不申请。刷新页面时调用它来决定「能直接扫描」还是「先请用户点一下授权」，
+ * 绝不能在恢复阶段弹出授权框。
+ */
+export async function queryPermission(
+  handle: FileSystemHandle,
+  mode: 'read' | 'readwrite' = 'readwrite',
+): Promise<PermissionStatus> {
   const target = handle as unknown as PermissionCapable
   try {
-    const state = await target.queryPermission?.({ mode: 'readwrite' })
-    if (state === 'granted') return true
-    const next = await target.requestPermission?.({ mode: 'readwrite' })
-    return next === 'granted'
+    const state = await target.queryPermission?.({ mode })
+    return state === 'granted' || state === 'denied' ? state : 'prompt'
   } catch {
-    return false
+    return 'prompt'
   }
+}
+
+/** 申请权限：必须在用户手势里调用（点按钮 / 拖放），否则浏览器会直接拒绝。 */
+export async function requestPermission(
+  handle: FileSystemHandle,
+  mode: 'read' | 'readwrite' = 'readwrite',
+): Promise<PermissionStatus> {
+  const target = handle as unknown as PermissionCapable
+  try {
+    const state = await target.requestPermission?.({ mode })
+    if (state === 'granted' || state === 'denied') return state
+    return queryPermission(handle, mode)
+  } catch {
+    return 'denied'
+  }
+}
+
+/** 写权限要用户点一下才算数，重新打开页面后通常需要再确认一次。 */
+export async function requestWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
+  return (await requestPermission(handle, 'readwrite')) === 'granted'
 }
 
 /** 只查询不申请：刷新页面时不该突然弹权限框。 */
 export async function hasWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
-  const target = handle as unknown as PermissionCapable
+  return (await queryPermission(handle, 'readwrite')) === 'granted'
+}
+
+/** 两个句柄是不是同一个条目：同一目录再次打开时用它复用工作空间 id。 */
+export async function isSameEntry(a: FileSystemHandle, b: FileSystemHandle): Promise<boolean> {
+  const target = a as unknown as { isSameEntry?: (other: FileSystemHandle) => Promise<boolean> }
+  if (typeof target.isSameEntry !== 'function') return false
   try {
-    return (await target.queryPermission?.({ mode: 'readwrite' })) === 'granted'
+    return await target.isSameEntry(b)
   } catch {
     return false
   }
@@ -135,6 +168,12 @@ export async function readLocalFile(handle: FileSystemFileHandle) {
   return file.text()
 }
 
+/** 读内容 + 文件自身的 lastModified：写盘前拿它和基准比较，判断外部有没有改过。 */
+export async function readLocalFileWithInfo(handle: FileSystemFileHandle): Promise<{ content: string; lastModified: number }> {
+  const file = await handle.getFile()
+  return { content: await file.text(), lastModified: file.lastModified }
+}
+
 export async function writeLocalFile(handle: FileSystemFileHandle, content: string) {
   const writable = await handle.createWritable()
   await writable.write(content)
@@ -143,13 +182,7 @@ export async function writeLocalFile(handle: FileSystemFileHandle, content: stri
 
 /** 单个文件句柄的写权限：拖进来的文件不在任何已扫描的目录里，得单独确认一次。 */
 export async function ensureFileWritePermission(handle: FileSystemFileHandle): Promise<boolean> {
-  const target = handle as unknown as PermissionCapable
-  try {
-    if ((await target.queryPermission?.({ mode: 'readwrite' })) === 'granted') return true
-    return (await target.requestPermission?.({ mode: 'readwrite' })) === 'granted'
-  } catch {
-    return false
-  }
+  return (await requestPermission(handle, 'readwrite')) === 'granted'
 }
 
 /** 文件名里的分隔符与 Windows 保留字符一律换成连字符，空名回落成「未命名」。 */
@@ -162,24 +195,85 @@ export function sanitizeFileName(name: string, fallback = 'document') {
   return (cleaned || fallback) + '.md'
 }
 
+/** 把 `notes/a.md` 拆成目录段与文件名，带扩展名的位置留给调用方插序号。 */
+function splitPath(relativePath: string) {
+  const segments = relativePath.split('/').filter(Boolean)
+  const fileName = segments.pop() ?? 'document.md'
+  const dot = fileName.lastIndexOf('.')
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName
+  const extension = dot > 0 ? fileName.slice(dot) : ''
+  return { segments, base, extension }
+}
+
+async function directoryFor(root: FileSystemDirectoryHandle, segments: string[], create: boolean) {
+  let directory = root
+  for (const segment of segments) {
+    directory = await directory.getDirectoryHandle(segment, create ? { create: true } : undefined)
+  }
+  return directory
+}
+
+async function fileExists(root: FileSystemDirectoryHandle, segments: string[], fileName: string) {
+  try {
+    const directory = await directoryFor(root, segments, false)
+    await directory.getFileHandle(fileName)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 按相对路径取回文件句柄；路径不存在时返回 null（不抛错）。 */
+export async function resolvePathHandle(
+  root: FileSystemDirectoryHandle,
+  relativePath: string,
+): Promise<FileSystemFileHandle | null> {
+  try {
+    const { segments, base, extension } = splitPath(relativePath)
+    const directory = await directoryFor(root, segments, false)
+    return await directory.getFileHandle(`${base}${extension}`)
+  } catch {
+    return null
+  }
+}
+
 /**
- * 在已连接的目录里新建一个文件（必要时顺带建出中间目录），写完返回句柄。
- * 「另存到磁盘」走这条路：文档就此绑定，后续改动自动写回。
+ * 找一个不会覆盖已有文件的路径：`notes.md` 已存在就用 `notes-2.md`、`notes-3.md`。
+ * 「另存到磁盘」不能悄悄吃掉同名的旧文件，也不能每次都让用户手动改名。
+ */
+export async function resolveAvailablePath(
+  root: FileSystemDirectoryHandle,
+  relativePath: string,
+  maxAttempts = 50,
+): Promise<string> {
+  const { segments, base, extension } = splitPath(relativePath)
+  let candidate = base
+  for (let index = 2; index <= maxAttempts; index += 1) {
+    if (!(await fileExists(root, segments, `${candidate}${extension}`))) {
+      return [...segments, `${candidate}${extension}`].join('/')
+    }
+    candidate = `${base}-${index}`
+  }
+  // 极端情况：同名文件太多，退回时间戳，宁可名字难看也不要覆盖。
+  return [...segments, `${base}-${Date.now().toString(36)}${extension}`].join('/')
+}
+
+/**
+ * 在已连接的目录里新建一个文件（必要时顺带建出中间目录），写完返回实际路径与句柄。
+ * 默认不覆盖同名文件：`overwrite` 只在明确保存「已经绑定到该路径」的文档时才置为 true。
  */
 export async function createLocalFile(
   root: FileSystemDirectoryHandle,
   relativePath: string,
   content: string,
-): Promise<FileSystemFileHandle> {
-  const segments = relativePath.split('/').filter(Boolean)
-  const fileName = segments.pop() ?? 'document.md'
-  let directory = root
-  for (const segment of segments) {
-    directory = await directory.getDirectoryHandle(segment, { create: true })
-  }
-  const handle = await directory.getFileHandle(fileName, { create: true })
+  options: { overwrite?: boolean } = {},
+): Promise<{ path: string; handle: FileSystemFileHandle }> {
+  const targetPath = options.overwrite ? relativePath : await resolveAvailablePath(root, relativePath)
+  const { segments, base, extension } = splitPath(targetPath)
+  const directory = await directoryFor(root, segments, true)
+  const handle = await directory.getFileHandle(`${base}${extension}`, { create: true })
   await writeLocalFile(handle, content)
-  return handle
+  return { path: targetPath, handle }
 }
 
 interface TransferItemWithHandle {
@@ -229,7 +323,21 @@ export async function handlesFromTransfer(items: DataTransferItemList | null): P
 
 const DB_NAME = 'markpage.fs'
 const STORE_NAME = 'handles'
-const FOLDER_KEY = 'workspace-folder'
+
+/** 旧版本只存一个目录句柄，键名固定；迁移时读一次就删。 */
+const LEGACY_FOLDER_KEY = 'workspace-folder'
+
+/** 工作空间根目录句柄：一个工作空间一把钥匙，互不覆盖。 */
+export function workspaceRootKey(workspaceId: string) {
+  return `workspace-root:${workspaceId}`
+}
+
+/** 拖进来的外部单文件句柄：按文档 id 存，和任何工作空间都无关。 */
+export function externalFileKey(documentId: string) {
+  return `external-file:${documentId}`
+}
+
+export const LEGACY_WORKSPACE_HANDLE_KEY = LEGACY_FOLDER_KEY
 
 function openDatabase(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)
@@ -243,13 +351,14 @@ function openDatabase(): Promise<IDBDatabase | null> {
   })
 }
 
-export async function saveFolderHandle(handle: FileSystemDirectoryHandle) {
+/** 句柄可以被结构化克隆，所以能直接塞进 IndexedDB。失败一律静默：记不住不影响本次会话。 */
+export async function saveHandle(key: string, handle: FileSystemHandle) {
   const db = await openDatabase()
   if (!db) return
   await new Promise<void>((resolve) => {
     try {
       const transaction = db.transaction(STORE_NAME, 'readwrite')
-      transaction.objectStore(STORE_NAME).put(handle, FOLDER_KEY)
+      transaction.objectStore(STORE_NAME).put(handle, key)
       transaction.oncomplete = () => resolve()
       transaction.onerror = () => resolve()
     } catch {
@@ -260,27 +369,36 @@ export async function saveFolderHandle(handle: FileSystemDirectoryHandle) {
   db.close()
 }
 
-export async function loadFolderHandle(): Promise<FileSystemDirectoryHandle | null> {
+export async function loadHandle<T extends FileSystemHandle = FileSystemHandle>(key: string): Promise<T | null> {
   const db = await openDatabase()
   if (!db) return null
-  const handle = await new Promise<FileSystemDirectoryHandle | null>((resolve) => {
+  const handle = await new Promise<T | null>((resolve) => {
     const transaction = db.transaction(STORE_NAME, 'readonly')
-    const request = transaction.objectStore(STORE_NAME).get(FOLDER_KEY)
-    request.onsuccess = () => resolve((request.result as FileSystemDirectoryHandle | undefined) ?? null)
+    const request = transaction.objectStore(STORE_NAME).get(key)
+    request.onsuccess = () => resolve((request.result as T | undefined) ?? null)
     request.onerror = () => resolve(null)
   })
   db.close()
   return handle
 }
 
-export async function clearFolderHandle() {
+export async function deleteHandle(key: string) {
   const db = await openDatabase()
   if (!db) return
   await new Promise<void>((resolve) => {
     const transaction = db.transaction(STORE_NAME, 'readwrite')
-    transaction.objectStore(STORE_NAME).delete(FOLDER_KEY)
+    transaction.objectStore(STORE_NAME).delete(key)
     transaction.oncomplete = () => resolve()
     transaction.onerror = () => resolve()
   })
   db.close()
+}
+
+/** 迁移用：旧版本那个唯一的目录句柄。 */
+export async function loadLegacyFolderHandle(): Promise<FileSystemDirectoryHandle | null> {
+  return loadHandle<FileSystemDirectoryHandle>(LEGACY_FOLDER_KEY)
+}
+
+export async function clearLegacyFolderHandle() {
+  await deleteHandle(LEGACY_FOLDER_KEY)
 }

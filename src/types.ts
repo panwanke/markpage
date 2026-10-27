@@ -1,6 +1,28 @@
 import type { SidebarLayout } from './lib/layout'
 import type { Keymap } from './lib/shortcuts'
 
+/**
+ * 文档与磁盘文件的绑定关系。
+ *
+ * 只记相对路径是不够的：A、B 两个工作空间里都可能存在 `notes/index.md`，
+ * 切根之后同路径的文件会被写串。所以工作空间身份必须进入绑定本身。
+ */
+export type DocumentBinding =
+  | { kind: 'workspace'; workspaceId: string; path: string }
+  | { kind: 'external'; handleKey: string; path: string }
+
+/** 上次与磁盘对齐时的指纹：内容是哈希，时间取文件自身的 lastModified。 */
+export interface DiskBaseline {
+  hash: string
+  lastModified: number
+}
+
+/**
+ * 绑定文档的磁盘状态。与浏览器缓存状态（saveState）是两件事：
+ * 缓存已保存不代表文件已经写进磁盘。
+ */
+export type DiskState = 'clean' | 'pending' | 'writing' | 'readonly' | 'error' | 'conflict'
+
 export interface MarkdownDocument {
   id: string
   name: string
@@ -8,14 +30,27 @@ export interface MarkdownDocument {
   createdAt: string
   updatedAt: string
   open: boolean
-  /** 绑定了本地文件夹里的文件时记下相对路径，改动会写回磁盘。 */
-  localPath?: string
+  /** 没有绑定 = 纯浏览器文档，改动只落在 localStorage。 */
+  binding?: DocumentBinding
+  /** 写盘与冲突判定用的磁盘基准。 */
+  diskBaseline?: DiskBaseline
 }
 
 export type PaperSize = 'A4' | 'Letter'
 
-/** 排版 / 源码 / 双栏（左边排版、右边源码，改哪边另一边都跟着变）。 */
-export type EditorMode = 'rendered' | 'source' | 'split'
+/** 核心编辑模式：排版 / 源码 / 双栏（左边排版、右边源码，改哪边另一边都跟着变）。 */
+export type CoreEditorMode = 'rendered' | 'source' | 'split'
+
+/** 插件可以注册自己的编辑模式，写作 `plugin:<插件 id>`。 */
+export type EditorMode = CoreEditorMode | `plugin:${string}`
+
+export function isPluginEditorMode(mode: EditorMode): mode is `plugin:${string}` {
+  return mode.startsWith('plugin:')
+}
+
+export function pluginEditorMode(pluginId: string): `plugin:${string}` {
+  return `plugin:${pluginId}`
+}
 
 export interface PageConfig {
   title: string
@@ -120,5 +155,7 @@ export interface WorkspaceSettings {
   docFont: string
   /** 快捷键：命令 id → 键位，未自定义的命令沿用 COMMANDS 里的默认值。 */
   keymap: Keymap
+  /** 启用的内置插件 id；缺省时按 DEFAULT_ENABLED_PLUGINS 补齐。 */
+  enabledPluginIds: string[]
   exportConfig: ExportConfig
 }

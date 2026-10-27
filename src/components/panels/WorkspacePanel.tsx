@@ -1,27 +1,33 @@
 import { useState } from 'react'
-import { FilePlus2, FileText, FolderOpen, HardDrive, RefreshCw, ShieldCheck, X } from 'lucide-react'
+import { FilePlus2, FileText, FolderOpen, HardDrive, History, RefreshCw, ShieldCheck, X } from 'lucide-react'
 import DocumentMenu from '../DocumentMenu'
 import type { DocumentMenuActions } from '../DocumentMenu'
 import { isContextMenuKey } from '../../lib/keys'
 import { useI18n } from '../../i18n'
-import type { MarkdownDocument } from '../../types'
+import type { MessageKey } from '../../i18n'
+import type { DiskState, MarkdownDocument } from '../../types'
 
-export interface FolderView {
+export interface WorkspaceView {
   name: string
   writable: boolean
   /** 文件数触顶被截断：列表不完整，要在界面上说清楚。 */
   truncated?: boolean
   scanning?: boolean
+  /** 目录已不可访问（被移动 / 删除 / 权限撤销）。 */
+  invalid?: boolean
+  /** 只读且需要用户点一下授权。 */
+  needsPermission?: boolean
   files: { path: string; title: string }[]
 }
-
 
 interface WorkspacePanelProps {
   documents: MarkdownDocument[]
   activeId: string
-  /** 当前文档绑定的磁盘文件相对路径，用于在文件夹列表里高亮。 */
-  activeLocalPath: string
-  folder: FolderView | null
+  /** 当前文档绑定在当前工作空间里的相对路径，用于在文件列表里高亮。 */
+  activePath: string
+  workspace: WorkspaceView | null
+  /** 每篇文档的磁盘状态：绑定文档才显示「已写入 / 待写入 / 冲突」。 */
+  diskStates: Map<string, DiskState>
   onOpen: (id: string) => void
   onNew: () => void
   onRename: (id: string, name: string) => void
@@ -30,10 +36,11 @@ interface WorkspacePanelProps {
   onClose: (id: string) => void
   onDelete: (id: string) => void
   onOpenFolder: () => void
+  onOpenRecent: () => void
   onRefreshFolder: () => void
   onDisconnectFolder: () => void
   onPermitWrite: () => void
-  onOpenLocalFile: (path: string) => void
+  onOpenWorkspaceFile: (path: string) => void
   /** 磁盘类操作：另存 / 解除绑定 / 重新载入 / 复制路径。 */
   onSaveToDisk: (id: string) => void
   onUnbind: (id: string) => void
@@ -47,11 +54,21 @@ interface MenuState {
   y: number
 }
 
+const DISK_LABELS: Record<DiskState, MessageKey> = {
+  clean: 'localfs.diskClean',
+  pending: 'localfs.diskPending',
+  writing: 'localfs.diskWriting',
+  readonly: 'localfs.diskReadonly',
+  error: 'localfs.diskError',
+  conflict: 'localfs.diskConflict',
+}
+
 export default function WorkspacePanel({
   documents,
   activeId,
-  activeLocalPath,
-  folder,
+  activePath,
+  workspace,
+  diskStates,
   onOpen,
   onNew,
   onRename,
@@ -60,10 +77,11 @@ export default function WorkspacePanel({
   onClose,
   onDelete,
   onOpenFolder,
+  onOpenRecent,
   onRefreshFolder,
   onDisconnectFolder,
   onPermitWrite,
-  onOpenLocalFile,
+  onOpenWorkspaceFile,
   onSaveToDisk,
   onUnbind,
   onReload,
@@ -109,33 +127,35 @@ export default function WorkspacePanel({
       <div className="panel-toolbar">
         <button className="panel-action" onClick={onNew}><FilePlus2 size={14} />{t('common.new')}</button>
         <button className="panel-action" onClick={onOpenFolder} title={t('localfs.openFolderHint')}><FolderOpen size={14} />{t('localfs.openFolder')}</button>
+        <button className="panel-action" onClick={onOpenRecent} title={t('localfs.recentHint')} aria-label={t('localfs.recent')}><History size={14} /></button>
       </div>
 
-      {folder && (
+      {workspace && (
         <div className="local-folder">
           <div className="local-folder-head">
             <FolderOpen size={13} />
-            <strong title={folder.name}>{folder.name}</strong>
-            <span className={`local-folder-badge ${folder.writable ? 'is-writable' : ''}`}>
-              {folder.writable ? t('localfs.writable') : t('localfs.readonly')}
+            <strong title={workspace.name}>{workspace.name}</strong>
+            <span className={`local-folder-badge ${workspace.writable ? 'is-writable' : ''}`}>
+              {workspace.writable ? t('localfs.writable') : t('localfs.readonly')}
             </span>
             <button title={t('localfs.refresh')} aria-label={t('localfs.refresh')} onClick={onRefreshFolder}><RefreshCw size={13} /></button>
             <button title={t('localfs.disconnect')} aria-label={t('localfs.disconnect')} onClick={onDisconnectFolder}><X size={13} /></button>
           </div>
-          {!folder.writable && (
+          {workspace.invalid && <p className="local-file-empty is-warning">{t('localfs.scanFailed', { name: workspace.name })}</p>}
+          {!workspace.writable && !workspace.invalid && (
             <button className="local-folder-permit" onClick={onPermitWrite}>
               <ShieldCheck size={13} />{t('localfs.permit')}
             </button>
           )}
-          {folder.scanning && <p className="local-file-empty">{t('localfs.scanning')}</p>}
-          {folder.files.length ? (
+          {workspace.scanning && <p className="local-file-empty">{t('localfs.scanning')}</p>}
+          {workspace.files.length ? (
             <div className="local-file-list">
-              {folder.files.map((file) => (
+              {workspace.files.map((file) => (
                 <button
                   key={file.path}
-                  className={`local-file-item ${file.path === activeLocalPath ? 'active' : ''}`}
+                  className={`local-file-item ${file.path === activePath ? 'active' : ''}`}
                   title={file.path}
-                  onClick={() => onOpenLocalFile(file.path)}
+                  onClick={() => onOpenWorkspaceFile(file.path)}
                 >
                   <FileText size={13} />
                   <span>{file.path}</span>
@@ -143,10 +163,10 @@ export default function WorkspacePanel({
               ))}
             </div>
           ) : (
-            !folder.scanning && <p className="local-file-empty">{t('localfs.empty')}</p>
+            !workspace.scanning && !workspace.invalid && <p className="local-file-empty">{t('localfs.empty')}</p>
           )}
-          {folder.truncated && !folder.scanning && (
-            <p className="local-file-empty">{t('localfs.truncated', { count: folder.files.length })}</p>
+          {workspace.truncated && !workspace.scanning && (
+            <p className="local-file-empty">{t('localfs.truncated', { count: workspace.files.length })}</p>
           )}
         </div>
       )}
@@ -155,13 +175,14 @@ export default function WorkspacePanel({
         {documents.map((document) => {
           const name = document.name.trim() || t('document.untitled')
           const editing = editingId === document.id
+          const diskState = diskStates.get(document.id)
           return (
             <div
               className={`document-list-item ${document.id === activeId ? 'active' : ''} ${editing ? 'is-editing' : ''}`}
               key={document.id}
               role="button"
               tabIndex={editing ? -1 : 0}
-              title={document.localPath ? t('localfs.localBadge', { path: document.localPath }) : t('workspace.itemHint')}
+              title={document.binding ? t('localfs.localBadge', { path: document.binding.path }) : t('workspace.itemHint')}
               onClick={() => { if (!editing) onOpen(document.id) }}
               onKeyDown={(event) => {
                 if (editing) return
@@ -210,8 +231,11 @@ export default function WorkspacePanel({
                     {document.open ? t('sidebar.opened') : t('sidebar.closed')}
                     {' · '}
                     {new Date(document.updatedAt).toLocaleDateString(localeId)}
-                    {document.localPath && <HardDrive size={11} className="document-local-badge" />}
+                    {document.binding && <HardDrive size={11} className="document-local-badge" />}
                   </small>
+                  {document.binding && diskState && (
+                    <small className={`disk-state is-${diskState}`}>{t(DISK_LABELS[diskState])}</small>
+                  )}
                 </span>
               )}
             </div>
@@ -224,7 +248,7 @@ export default function WorkspacePanel({
           x={menu.x}
           y={menu.y}
           document={target}
-          folderConnected={Boolean(folder)}
+          workspaceConnected={Boolean(workspace)}
           actions={menuActions}
           onClose={() => setMenu(null)}
         />

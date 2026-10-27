@@ -6,7 +6,8 @@ import { clampUiScale } from './fonts'
 import { createDefaultLayout, normalizeLayout } from './layout'
 import { getPageConfig, UNTITLED_TITLE } from './markdown'
 import { DEFAULT_KEYMAP, normalizeKeymap } from './shortcuts'
-import type { MarkdownDocument, WorkspaceSettings } from '../types'
+import { DEFAULT_ENABLED_PLUGIN_IDS } from '../plugins/ids'
+import type { DiskBaseline, DocumentBinding, EditorMode, MarkdownDocument, WorkspaceSettings } from '../types'
 
 const DOCUMENTS_KEY = 'markpage.documents.v1'
 const SETTINGS_KEY = 'markpage.settings.v1'
@@ -36,7 +37,54 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   uiScale: 1.15,
   docFont: 'serif',
   keymap: { ...DEFAULT_KEYMAP },
+  enabledPluginIds: [...DEFAULT_ENABLED_PLUGIN_IDS],
   exportConfig: CUSTOM_EXPORT_DEFAULT,
+}
+
+const PLUGIN_MODE_PATTERN = /^plugin:[A-Za-z0-9._-]+$/
+
+/**
+ * 编辑模式只认核心三档和 `plugin:<id>` 的形状。
+ * 这里不硬编码任何插件 id：插件被删掉时由宿主负责回退，存储层只管格式。
+ */
+export function normalizeEditorMode(value: unknown): EditorMode {
+  if (value === 'rendered' || value === 'source' || value === 'split') return value
+  if (typeof value === 'string' && PLUGIN_MODE_PATTERN.test(value)) return value as EditorMode
+  return 'rendered'
+}
+
+/** 缺字段（老版本设置）落回默认集合；脏值逐条丢弃，重复 id 去重。 */
+export function normalizeEnabledPlugins(value: unknown): string[] {
+  if (!Array.isArray(value)) return [...DEFAULT_ENABLED_PLUGIN_IDS]
+  const ids = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return [...new Set(ids)]
+}
+
+function normalizeBinding(raw: unknown): DocumentBinding | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const source = raw as Record<string, unknown>
+  const path = typeof source.path === 'string' ? source.path : ''
+  if (!path) return undefined
+  if (source.kind === 'workspace' && typeof source.workspaceId === 'string' && source.workspaceId) {
+    return { kind: 'workspace', workspaceId: source.workspaceId, path }
+  }
+  if (source.kind === 'external' && typeof source.handleKey === 'string' && source.handleKey) {
+    return { kind: 'external', handleKey: source.handleKey, path }
+  }
+  return undefined
+}
+
+function normalizeBaseline(raw: unknown): DiskBaseline | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const source = raw as Record<string, unknown>
+  if (typeof source.hash !== 'string' || !source.hash) return undefined
+  const lastModified = typeof source.lastModified === 'number' && Number.isFinite(source.lastModified)
+    ? source.lastModified
+    : 0
+  return { hash: source.hash, lastModified }
 }
 
 /**
@@ -68,9 +116,19 @@ export function loadDocuments() {
   try {
     const saved = localStorage.getItem(DOCUMENTS_KEY)
     if (saved) {
-      const docs = JSON.parse(saved) as MarkdownDocument[]
+      const docs = JSON.parse(saved) as Array<Record<string, unknown>>
       if (Array.isArray(docs) && docs.length) {
-        return docs.map((document) => ({ ...document, name: normalizeDocumentName(document.name) }))
+        return docs.map((raw) => {
+          // 旧版本只记 localPath：内容留在浏览器里，但不升级成可自动写盘的绑定 ——
+          // 那个路径属于哪个根目录已经无法确认，静默写回可能串到别的工作空间。
+          const { localPath: _legacyPath, ...rest } = raw
+          return {
+            ...rest,
+            name: normalizeDocumentName(rest.name),
+            binding: normalizeBinding(rest.binding),
+            diskBaseline: normalizeBaseline(rest.diskBaseline),
+          } as unknown as MarkdownDocument
+        })
       }
     }
   } catch {
@@ -102,7 +160,8 @@ export function loadSettings(): WorkspaceSettings {
       // 老版本没有 keymap 字段：缺项自动落回默认键位，坏掉的写法也一并丢掉。
       keymap: normalizeKeymap(raw.keymap),
       revisionMode: merged.revisionMode === true,
-      editorMode: merged.editorMode === 'source' || merged.editorMode === 'split' ? merged.editorMode : 'rendered',
+      editorMode: normalizeEditorMode(merged.editorMode),
+      enabledPluginIds: normalizeEnabledPlugins(raw.enabledPluginIds),
     }
   } catch {
     return DEFAULT_SETTINGS

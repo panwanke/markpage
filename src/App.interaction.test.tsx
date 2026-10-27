@@ -256,3 +256,49 @@ describe('toolbar and export shortcut integration', () => {
     expect(host.querySelector('.export-dialog')).toBeTruthy()
   })
 })
+
+describe('Obsidian Live Editing plugin', () => {
+  const LIVE_MODE = 'plugin:markpage.obsidian-live-editing'
+
+  async function mountWith(options: { editorMode: string; enabledPluginIds: string[] }) {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    localStorage.setItem('markpage.documents.v1', JSON.stringify([createDocument('# 标题\n\n正文', 'A')]))
+    localStorage.setItem('markpage.settings.v1', JSON.stringify({
+      ...DEFAULT_SETTINGS, locale: 'en-US', showComments: false, viewMode: 'continuous',
+      editorMode: options.editorMode, enabledPluginIds: options.enabledPluginIds,
+      keymap: DEFAULT_KEYMAP, layout: { ...DEFAULT_SETTINGS.layout, visible: false },
+    }))
+    root = createRoot(host)
+    await act(() => root!.render(<App />))
+    // 插件首次同步在微任务里完成；再 flush 一次，模式回退才算落地。
+    await act(async () => { await Promise.resolve() })
+  }
+
+  it('默认关闭：没有实时模式按钮，也不会挂载编辑器', async () => {
+    await mountWith({ editorMode: 'source', enabledPluginIds: ['markpage.focus-mode'] })
+    expect(buttonWithText('.mode-switch button', 'Live')).toBeUndefined()
+    expect(host.querySelector('.live-preview-editor')).toBeNull()
+  })
+
+  it('启用后出现模式按钮，切换后挂载单一连续编辑视图', async () => {
+    await mountWith({ editorMode: 'source', enabledPluginIds: ['markpage.focus-mode', 'markpage.obsidian-live-editing'] })
+    const liveButton = buttonWithText('.mode-switch button', 'Live')
+    expect(liveButton).toBeTruthy()
+    await click(liveButton)
+    expect(host.querySelector('.live-preview-editor')).toBeTruthy()
+    expect(host.querySelector('.cm-content')?.textContent).toContain('# 标题')
+    // 排版纸张与源码栏都不该同时存在：这是单一视图。
+    expect(host.querySelector('.paper-page')).toBeNull()
+    expect(host.querySelector('.source-editor')).toBeNull()
+  })
+
+  it('插件被停用后，已保存的插件模式安全回退到排版视图', async () => {
+    await mountWith({ editorMode: LIVE_MODE, enabledPluginIds: ['markpage.focus-mode'] })
+    expect(host.querySelector('.live-preview-editor')).toBeNull()
+    expect(host.querySelector('.paper-page')).toBeTruthy()
+  })
+})
