@@ -58,3 +58,10 @@ export function shiftTab(orderedIds: string[], id: string, step: number): string
   next.splice(to, 0, id)
   return next
 }
+
+/** Only unmodified Alt+arrows reorder tabs; Ctrl/Meta+Alt switch tabs. */
+export function tabMoveStep(event: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>
+  & Partial<Pick<KeyboardEvent, 'isComposing' | 'defaultPrevented'>>): number {
+  if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing || event.defaultPrevented) return 0
+  return event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0
+}

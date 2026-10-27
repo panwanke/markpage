@@ -155,6 +155,7 @@ export const zhCN = {
   'editor.splitDrag': '拖动调整源码栏宽度，双击复位',
   'editor.sourceLabel': 'Markdown 源码',
 
+  'revision.invalidRange': '选区跨越修订标记，或新文字包含修订语法。请调整选区，或先接受/拒绝已有修订。',
   'revision.toggleOn': '打开修订模式',
   'revision.toggleOff': '关闭修订模式',
   'revision.markDelete': '标记删除（先选中文字）',

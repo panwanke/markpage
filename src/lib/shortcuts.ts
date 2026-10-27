@@ -155,6 +155,7 @@ export function parseBinding(binding: string): ParsedBinding | null {
     } else if (lower === 'shift') {
       if (!mods.includes('Shift')) mods.push('Shift')
     } else {
+      if (key) return null
       key = canonicalKey(part)
     }
   }
@@ -193,7 +194,8 @@ export function matchesBinding(
 export function isValidBinding(binding: string): boolean {
   const parsed = parseBinding(binding)
   if (!parsed) return false
-  if (parsed.mods.length) return true
+  if (!NAMED_KEYS.has(parsed.key) && [...parsed.key].length !== 1) return false
+  if (parsed.mods.includes('Mod') || parsed.mods.includes('Alt')) return true
   return NAMED_KEYS.has(parsed.key) && parsed.key !== 'Space'
 }
 
@@ -254,6 +256,8 @@ export function bindingIndex(keymap: Keymap): Map<string, CommandId> {
   }
   // 兼容别名放在正式键位之后：谁也没占用时才生效，用户把 Ctrl+Y 派给别的命令也不会被抢。
   for (const [id, aliases] of Object.entries(ALIASES) as [CommandId, string[]][]) {
+    // Customizing or clearing a command also disables its default aliases.
+    if (normalizeBinding(keymap[id] ?? '') !== DEFAULT_KEYMAP[id]) continue
     for (const alias of aliases) {
       const binding = normalizeBinding(alias)
       if (binding && !index.has(binding)) index.set(binding, id)
@@ -280,6 +284,11 @@ export function findConflict(keymap: Keymap, id: CommandId, binding: string): Co
   return null
 }
 
+export function assignBinding(keymap: Keymap, id: CommandId, binding: string) {
+  const conflict = findConflict(keymap, id, binding)
+  return { conflict, keymap: conflict ? keymap : { ...keymap, [id]: normalizeBinding(binding) } }
+}
+
 /** 录制键位时置位：全局监听看到它就不再触发命令，否则录 Ctrl+B 会顺手加粗一次。 */
 let capturing = false
 export function setShortcutCapture(active: boolean) { capturing = active }
@@ -303,4 +312,18 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
   const tag = element.tagName.toLowerCase()
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
   return element.isContentEditable === true
+}
+
+export const SOURCE_COMMANDS = new Set<CommandId>([
+  'edit.undo', 'edit.redo', 'edit.deleteSelection',
+  'format.bold', 'format.strike', 'format.highlight', 'format.code', 'format.clear', 'format.comment',
+  'revision.markDelete', 'revision.insert', 'revision.acceptAll', 'revision.rejectAll',
+])
+
+type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>
+  & Partial<Pick<KeyboardEvent, 'defaultPrevented' | 'isComposing'>>
+
+export function commandForKeyEvent(event: ShortcutEvent, index: Map<string, CommandId>): CommandId | undefined {
+  if (event.defaultPrevented || event.isComposing || isShortcutCapturing()) return undefined
+  return index.get(eventToBinding(event))
 }

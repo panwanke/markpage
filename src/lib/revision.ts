@@ -222,6 +222,8 @@ export function markDeletion(markdown: string, range: SourceRange) {
     const body = inner.trim() ? `${INSERT_OPEN}${inner}${INSERT_CLOSE}` : inner
     return markdown.slice(0, insideInsert.start) + body + markdown.slice(insideInsert.end)
   }
+  // Do not wrap an existing deletion or cut through revision delimiters.
+  if (inRanges(marks, start, end)) return markdown
   return `${markdown.slice(0, start)}~${markdown.slice(start, end)}~${markdown.slice(end)}`
 }
 
@@ -234,11 +236,22 @@ export function insertRevision(markdown: string, range: SourceRange, text: strin
   if (!clean) return markdown
   const { start, end } = range
   if (start < 0 || end > markdown.length || start > end) return markdown
-  if (start === end) {
-    if (isRevisionLocked(markdown, start)) return markdown
-    return `${markdown.slice(0, start)}${INSERT_OPEN}${clean}${INSERT_CLOSE}${markdown.slice(start)}`
-  }
   if (isRevisionLocked(markdown, start, end)) return markdown
+  // Revision syntax entered through this dialog must not create nested marks.
+  if (findRevisions(clean).length || /<\/?ins(?:\s|>)/i.test(clean)) return markdown
+  const marks = findRevisions(markdown)
+  const owner = marks.find((mark) => mark.innerStart <= start && end <= mark.innerEnd)
+  if (owner?.kind === 'insert') {
+    return markdown.slice(0, start) + clean + markdown.slice(end)
+  }
+  if (owner?.kind === 'delete') {
+    // Keep the original deleted text available for rejection.
+    return markdown.slice(0, owner.end) + INSERT_OPEN + clean + INSERT_CLOSE + markdown.slice(owner.end)
+  }
+  if (inRanges(marks, start, end)) return markdown
+  if (start === end) {
+    return markdown.slice(0, start) + INSERT_OPEN + clean + INSERT_CLOSE + markdown.slice(start)
+  }
   const quote = markdown.slice(start, end)
   const keepQuote = quote.trim() && !MARKUP_ONLY.test(quote) ? `~${quote}~` : ''
   return `${markdown.slice(0, start)}${keepQuote}${INSERT_OPEN}${clean}${INSERT_CLOSE}${markdown.slice(end)}`
@@ -314,6 +327,14 @@ export function trackSourceEdit(previous: string, next: string, caretHint?: numb
   if (added && isRevisionLocked(next, prefix, prefix + added.length)) return plain
 
   const marks = findRevisions(previous)
+  const deletedOwner = marks.find((mark) => mark.kind === 'delete'
+    && mark.innerStart <= removedStart && removedEnd <= mark.innerEnd)
+  if (deletedOwner && added) {
+    return {
+      markdown: previous.slice(0, deletedOwner.end) + INSERT_OPEN + added + INSERT_CLOSE + previous.slice(deletedOwner.end),
+      caret: deletedOwner.end + INSERT_OPEN.length + added.length,
+    }
+  }
 
   // 纯新增
   if (!removed) {
@@ -342,12 +363,12 @@ export function trackSourceEdit(previous: string, next: string, caretHint?: numb
   // 删掉的是自己刚插入的内容 / 已经被标成删除的内容：直接生效，不叠第二层标记。
   const owned = marks.find((mark) => mark.innerStart <= removedStart && removedEnd <= mark.innerEnd)
   if (owned) {
-    const inner = previous.slice(owned.innerStart, removedStart) + previous.slice(removedEnd, owned.innerEnd)
+    const inner = previous.slice(owned.innerStart, removedStart) + added + previous.slice(removedEnd, owned.innerEnd)
     // 标记里还剩内容：next 就是想要的结果。
-    if (inner.trim()) return plain
+    if (inner.length) return plain
     // 整条标记被删空了，连标记符号一起去掉，光标跟着左移。
     const result = previous.slice(0, owned.start) + previous.slice(owned.end)
-    return { markdown: result, caret: Math.max(0, caret + result.length - next.length) }
+    return { markdown: result, caret: owned.start }
   }
 
   // 删到了标记符号本身：说明用户在手工改源码，交给用户。

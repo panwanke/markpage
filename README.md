@@ -79,7 +79,9 @@ Rows sharing a prefix omit `Ctrl/⌘` after the first. The defaults deliberately
 - A conflict does **not** overwrite silently: the app names the command that already owns the combination and lets you decide which one to change.
 - The global listener is paused while recording, otherwise recording `Ctrl+B` would also apply bold for real.
 
-**No key stealing while an input has focus**: the source editor is a native `<textarea>`, so undo, backspace and delete remain the browser's job. Only commands that never touch the body — export, switching views, switching tabs — respond. `Delete` on the body (typeset view) is the app's own semantics: with revision mode on it is recorded as `~deleted~`, otherwise the text is removed from the source.
+**Editing shortcuts** work in both the typeset selection and the source editor (including the right pane in split view). Formatting and revision commands read the live source range; undo/redo uses the same per-document history in either pane. Insert / replace also accepts a collapsed caret. Ordinary inputs such as the document title and dialog fields retain native editing keys. IME composition and shortcut recording do not trigger document commands.
+
+The Ctrl+Y redo alias is available only while redo uses its default binding; clearing or remapping redo disables that alias. Restoring a single default binding uses the same conflict check as recording.
 
 The keymap lives in the `keymap` field of `markpage.settings.v1`, and a partial table is treated as complete: missing entries fall back to the default, corrupt entries are dropped, and empty strings (a binding the user cleared on purpose) are kept.
 
@@ -187,7 +189,7 @@ Documents under `examples/` are bundled into the app, loadable from the sidebar'
 | Markdown pipeline | unified (remark-parse → remark-gfm / math / frontmatter → remark-rehype → rehype-raw / slug / katex / highlight) |
 | Math and code | KaTeX, lowlight / highlight.js (common languages only) |
 | Styling | Plain CSS with custom properties (`--ui-scale`, `--ui-width`, `--doc-font`); no UI framework |
-| Testing | Vitest — 177 cases covering the rendering pipeline, revisions, export, i18n, shortcuts, tabs and storage |
+| Testing | Vitest — 206 cases covering the rendering pipeline, revisions, export, i18n, shortcuts, tabs and storage |
 | Static analysis | oxlint + `tsc -b` |
 
 There is no backend at runtime: documents and preferences live in localStorage, directory handles in IndexedDB, and export goes through the browser's download flow.

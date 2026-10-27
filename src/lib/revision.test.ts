@@ -215,3 +215,44 @@ describe('修订渲染', () => {
     expect(marks[0].className).not.toContain('rev-del')
   })
 })
+
+
+describe('editing existing revisions safely', () => {
+  it('keeps replacement text when all inserted content is overwritten', () => {
+    expect(trackSourceEdit('a<ins>old</ins>b', 'a<ins>new</ins>b', 9))
+      .toEqual({ markdown: 'a<ins>new</ins>b', caret: 9 })
+    expect(trackSourceEdit('a<ins>old</ins>b', 'a<ins> </ins>b', 7).markdown)
+      .toBe('a<ins> </ins>b')
+    expect(trackSourceEdit('a<ins>old</ins>b', 'a<ins></ins>b', 6))
+      .toEqual({ markdown: 'ab', caret: 1 })
+  })
+
+  it('replaces all or part of an insertion without nesting marks', () => {
+    const source = 'a<ins>old</ins>b'
+    const all = insertRevision(source, { start: 6, end: 9 }, 'new')
+    expect(all).toBe('a<ins>new</ins>b')
+    expect(acceptRevisions(all)).toBe('anewb')
+    expect(rejectRevisions(all)).toBe('ab')
+    expect(insertRevision(source, { start: 7, end: 8 }, 'NEW')).toBe('a<ins>oNEWd</ins>b')
+    expect(insertRevision(source, { start: 7, end: 7 }, 'NEW')).toBe('a<ins>oNEWld</ins>b')
+  })
+
+  it('preserves a deletion when inserting or replacing text inside it', () => {
+    const source = 'a~old~b'
+    const result = insertRevision(source, { start: 2, end: 5 }, 'new')
+    expect(result).toBe('a~old~<ins>new</ins>b')
+    expect(acceptRevisions(result)).toBe('anewb')
+    expect(rejectRevisions(result)).toBe('aoldb')
+    expect(trackSourceEdit(source, 'a~new~b', 5).markdown).toBe(result)
+    expect(trackSourceEdit(source, 'a~oXld~b', 4).markdown).toBe('a~old~<ins>X</ins>b')
+  })
+
+  it('refuses ranges crossing revision delimiters', () => {
+    const source = 'a<ins>old</ins>b'
+    expect(insertRevision(source, { start: 0, end: 8 }, 'new')).toBe(source)
+    expect(insertRevision(source, { start: 3, end: 3 }, 'new')).toBe(source)
+    expect(markDeletion(source, { start: 0, end: 8 })).toBe(source)
+    expect(markDeletion('a~old~b', { start: 2, end: 4 })).toBe('a~old~b')
+    expect(insertRevision('ab', { start: 1, end: 1 }, '<ins>new</ins>')).toBe('ab')
+  })
+})

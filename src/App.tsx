@@ -29,6 +29,8 @@ import CommentDialog from './components/CommentDialog'
 import RevisionDialog from './components/RevisionDialog'
 import RevisionPopover from './components/RevisionPopover'
 import SourceEditor from './components/SourceEditor'
+import type { SourceEditorHandle } from './components/SourceEditor'
+import { caretAfterEdit } from './lib/source-selection'
 import GitHubStar from './components/GitHubStar'
 import ExportMenu from './components/ExportMenu'
 import ExportDialog from './components/ExportDialog'
@@ -63,6 +65,7 @@ import {
   markDeletion,
   rejectRevisions,
   resolveRevision,
+  trackSourceEdit,
 } from './lib/revision'
 import type { RevisionAction, RevisionMark } from './lib/revision'
 import { buildExport, CLEAN_EXPORT } from './lib/export'
@@ -107,9 +110,8 @@ import {
   MENU_GROUPS,
   bindingIndex,
   detectPlatform,
-  eventToBinding,
+  commandForKeyEvent,
   formatBinding,
-  isShortcutCapturing,
   isTextEntryTarget,
 } from './lib/shortcuts'
 import type { CommandId } from './lib/shortcuts'
@@ -132,6 +134,8 @@ export default function App() {
   const [settings, setSettings] = useState(loadSettings)
   const [activeId, setActiveId] = useState('')
   const [selection, setSelection] = useState<SelectionSnapshot | null>(null)
+  const [selectionOrigin, setSelectionOrigin] = useState<'rendered' | 'source'>('rendered')
+  const sourceEditorRef = useRef<SourceEditorHandle>(null)
   const [selectionMenu, setSelectionMenu] = useState<SelectionMenuRequest | null>(null)
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
   const [modal, setModal] = useState<'settings' | 'comment' | 'export' | 'revision' | null>(null)
@@ -194,6 +198,23 @@ export default function App() {
   const platform = useMemo(() => detectPlatform(), [])
   const shortcutLabel = useCallback((id: CommandId) => formatBinding(keymap[id] ?? '', platform), [keymap, platform])
   const keyIndex = useMemo(() => bindingIndex(keymap), [keymap])
+  const hasSelectedText = Boolean(selection && selection.start < selection.end)
+  const handleSourceSelection = useCallback((next: SelectionSnapshot) => {
+    setSelection(next)
+    setSelectionOrigin('source')
+    setSelectionMenu(null)
+  }, [])
+
+  useEffect(() => {
+    setSelection(null)
+    setSelectionOrigin('rendered')
+  }, [activeDocument?.id])
+
+  function restoreSourceCaret(next: string) {
+    if (selectionOrigin === 'source') {
+      sourceEditorRef.current?.restoreSelection(caretAfterEdit(markdown, next))
+    }
+  }
 
   useEffect(() => {
     if (activeDocument && activeId !== activeDocument.id) setActiveId(activeDocument.id)
@@ -367,6 +388,7 @@ export default function App() {
     }
     historyRef.current.set(id, step.history)
     writeActiveMarkdown(step.markdown, { history: false })
+    restoreSourceCaret(step.markdown)
     setSelection(null)
     setSelectionMenu(null)
     window.getSelection()?.removeAllRanges()
@@ -383,6 +405,7 @@ export default function App() {
     }
     historyRef.current.set(id, step.history)
     writeActiveMarkdown(step.markdown, { history: false })
+    restoreSourceCaret(step.markdown)
     setSelection(null)
     setSelectionMenu(null)
     window.getSelection()?.removeAllRanges()
@@ -409,11 +432,12 @@ export default function App() {
       return
     }
     updateActiveDocument(next)
+    if (selectionOrigin === 'source') sourceEditorRef.current?.restoreSelection(caretAfterEdit(markdown, next))
     notify(t('toast.formatApplied'))
-  }, [activeDocument, markdown, updateActiveDocument, notify, t])
+  }, [activeDocument, markdown, updateActiveDocument, notify, t, selectionOrigin])
 
-  const handleFormat = useCallback((format: InlineFormat, option?: string) => {
-    if (selection) applyFormatTo(selection, format, option)
+  const handleFormat = useCallback((format: InlineFormat, option?: string, target = selection) => {
+    if (target) applyFormatTo(target, format, option)
   }, [selection, applyFormatTo])
 
   const copySelection = useCallback((text: string) => {
@@ -431,11 +455,10 @@ export default function App() {
 
   function switchMode(next: EditorMode) {
     if (next === mode) return
+    setSelection(null)
+    setSelectionOrigin('rendered')
     // 切走排版视图时，正文里的选区已经无效了，顺手清掉免得浮层留在屏幕上。
-    if (next === 'source') {
-      setSelection(null)
-      window.getSelection()?.removeAllRanges()
-    }
+    window.getSelection()?.removeAllRanges()
     updateSettings({ editorMode: next })
   }
 
@@ -451,11 +474,12 @@ export default function App() {
     return false
   }
 
-  function handleMarkDelete() {
-    if (!selection || !ensureRevivable(selection.start, selection.end)) return
-    const next = markDeletion(markdown, selection)
+  function handleMarkDelete(target = selection) {
+    if (!target || !ensureRevivable(target.start, target.end)) return
+    const next = markDeletion(markdown, target)
     if (next === markdown) return
     updateActiveDocument(next)
+    restoreSourceCaret(next)
     window.getSelection()?.removeAllRanges()
     setSelection(null)
     notify(t('toast.revisionMarked'))
@@ -464,8 +488,12 @@ export default function App() {
   function submitRevision(content: string) {
     if (!selection || !ensureRevivable(selection.start, selection.end)) return
     const next = insertRevision(markdown, selection, content)
-    if (next === markdown) return
+    if (next === markdown) {
+      notify(t('revision.invalidRange'))
+      return
+    }
     updateActiveDocument(next)
+    restoreSourceCaret(next)
     window.getSelection()?.removeAllRanges()
     setSelection(null)
     setModal(null)
@@ -523,9 +551,10 @@ export default function App() {
 
   const revisionControls: RevisionControls = {
     enabled: settings.revisionMode,
+    canInsert: Boolean(selection),
     total: revisions.total,
     onToggle: () => updateSettings({ revisionMode: !settings.revisionMode }),
-    onMarkDelete: handleMarkDelete,
+    onMarkDelete: () => handleMarkDelete(),
     onInsert: () => setModal('revision'),
     onAcceptAll: () => resolveAllRevisions('accept'),
     onRejectAll: () => resolveAllRevisions('reject'),
@@ -986,14 +1015,24 @@ export default function App() {
   // ---------- 命令层：菜单栏、快捷键、设置面板都走这里 ----------
 
   /** 删除选区：修订模式下记成删除修订，否则直接从源码里抹掉。 */
-  function deleteSelection() {
-    if (!selection) return
-    if (settings.revisionMode) {
-      handleMarkDelete()
+  function deleteSelection(target = selection) {
+    if (!target || target.start === target.end) return
+    if (selectionOrigin === 'source') {
+      const plain = markdown.slice(0, target.start) + markdown.slice(target.end)
+      const edit = settings.revisionMode ? trackSourceEdit(markdown, plain, target.start) : { markdown: plain, caret: target.start }
+      if (edit.markdown !== markdown) {
+        writeActiveMarkdown(edit.markdown)
+        sourceEditorRef.current?.restoreSelection(edit.caret)
+        setSelection(null)
+      }
       return
     }
-    if (!ensureRevivable(selection.start, selection.end)) return
-    const next = markdown.slice(0, selection.start) + markdown.slice(selection.end)
+    if (settings.revisionMode) {
+      handleMarkDelete(target)
+      return
+    }
+    if (!ensureRevivable(target.start, target.end)) return
+    const next = markdown.slice(0, target.start) + markdown.slice(target.end)
     if (next === markdown) return
     writeActiveMarkdown(next)
     window.getSelection()?.removeAllRanges()
@@ -1031,7 +1070,8 @@ export default function App() {
   }
 
   /** 命令能不能点：菜单置灰与快捷键是否拦截共用同一套判断。 */
-  function commandEnabled(id: CommandId): boolean {
+  function commandEnabled(id: CommandId, target = selection): boolean {
+    if (modal) return false
     switch (id) {
       case 'format.bold':
       case 'format.strike':
@@ -1041,8 +1081,9 @@ export default function App() {
       case 'format.comment':
       case 'edit.deleteSelection':
       case 'revision.markDelete':
+        return Boolean(target && target.start < target.end)
       case 'revision.insert':
-        return Boolean(selection)
+        return Boolean(target)
       case 'revision.acceptAll':
       case 'revision.rejectAll':
         return revisions.total > 0
@@ -1061,7 +1102,7 @@ export default function App() {
     }
   }
 
-  function executeCommand(id: CommandId) {
+  function executeCommand(id: CommandId, target = selection) {
     switch (id) {
       case 'file.new': newDocument(); break
       case 'file.import': fileInputRef.current?.click(); break
@@ -1076,16 +1117,16 @@ export default function App() {
       case 'file.settings': setSettingsTab('general'); setModal('settings'); break
       case 'edit.undo': undoDocument(); break
       case 'edit.redo': redoDocument(); break
-      case 'edit.deleteSelection': deleteSelection(); break
-      case 'format.bold': handleFormat('bold'); break
-      case 'format.strike': handleFormat('strikethrough'); break
-      case 'format.highlight': handleFormat('highlight'); break
-      case 'format.code': handleFormat('code'); break
-      case 'format.clear': handleFormat('clear'); break
-      case 'format.comment': if (selection) setModal('comment'); break
+      case 'edit.deleteSelection': deleteSelection(target); break
+      case 'format.bold': handleFormat('bold', undefined, target); break
+      case 'format.strike': handleFormat('strikethrough', undefined, target); break
+      case 'format.highlight': handleFormat('highlight', undefined, target); break
+      case 'format.code': handleFormat('code', undefined, target); break
+      case 'format.clear': handleFormat('clear', undefined, target); break
+      case 'format.comment': if (target) { setSelection(target); setModal('comment') } break
       case 'revision.toggle': toggleRevisionMode(); break
-      case 'revision.markDelete': handleMarkDelete(); break
-      case 'revision.insert': if (selection) setModal('revision'); break
+      case 'revision.markDelete': handleMarkDelete(target); break
+      case 'revision.insert': if (target) { setSelection(target); setModal('revision') } break
       case 'revision.acceptAll': resolveAllRevisions('accept'); break
       case 'revision.rejectAll': resolveAllRevisions('reject'); break
       case 'view.rendered': switchMode('rendered'); break
@@ -1111,10 +1152,7 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isShortcutCapturing() || event.isComposing) return
-      const binding = eventToBinding(event)
-      if (!binding) return
-      const id = keyIndex.get(binding)
+      const id = commandForKeyEvent(event, keyIndex)
       if (!id) return
       // 焦点在输入框里时只放行不碰正文的命令：撤销、退格、加粗交给浏览器原生行为。
       if (!ALLOWED_WHILE_TYPING.has(id) && isTextEntryTarget(event.target)) return
@@ -1301,7 +1339,7 @@ export default function App() {
               <button className={mode === 'source' ? 'active' : ''} onClick={() => switchMode('source')} title={t('editor.sourceHint')}><Code2 size={15} />{t('editor.source')}</button>
             </div>
             <div className="main-format-tools">
-              <FormattingToolbar disabled={!selection} revision={revisionControls} onFormat={handleFormat} onComment={() => selection && setModal('comment')} />
+              <FormattingToolbar disabled={!hasSelectedText} revision={revisionControls} onFormat={handleFormat} onComment={() => selection && setModal('comment')} />
             </div>
             <div className="view-actions">
               {/* 双栏下左栏固定连续视图：纸张是 794px 宽，塞进半屏只会横着滚动。 */}
@@ -1325,7 +1363,10 @@ export default function App() {
                   viewMode={mode === 'split' ? 'continuous' : settings.viewMode}
                   activeCommentId={activeCommentId}
                   revisionMode={settings.revisionMode}
-                  onSelection={setSelection}
+                  onSelection={(next) => {
+                    setSelection(next)
+                    setSelectionOrigin('rendered')
+                  }}
                   onCommentOpen={locateComment}
                   onRevisionOpen={openRevision}
                   onPageCount={handlePageCount}
@@ -1347,6 +1388,15 @@ export default function App() {
                   />
                 )}
                 <SourceEditor
+                  key={activeDocument.id}
+                  ref={sourceEditorRef}
+                  keymap={keymap}
+                  onSelection={handleSourceSelection}
+                  onCommand={(id, target) => {
+                    if (!commandEnabled(id, target)) return false
+                    executeCommand(id, target)
+                    return true
+                  }}
                   value={markdown}
                   revisionMode={settings.revisionMode}
                   compact={mode === 'split'}
@@ -1403,7 +1453,7 @@ export default function App() {
         />}
       </div>
 
-      {selection && !modal && mode !== 'source' && !selectionMenu && (
+      {selection && hasSelectedText && selectionOrigin === 'rendered' && !modal && mode !== 'source' && !selectionMenu && (
         <div ref={floatingToolbarRef} className="floating-toolbar" style={{ top: Math.max(116, selection.top - 54), left: toolbarLeft }}>
           <FormattingToolbar compact revision={revisionControls} onFormat={handleFormat} onComment={() => setModal('comment')} />
         </div>

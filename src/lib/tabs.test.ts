@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { moveTab, reorderOpenDocuments, shiftTab } from './tabs'
+import { moveTab, reorderOpenDocuments, shiftTab, tabMoveStep } from './tabs'
 import { COALESCE_MS, createHistory, pushHistory, redoHistory, undoHistory } from './history'
 
 const doc = (id: string, open = true) => ({ id, open, name: id })
@@ -67,5 +67,18 @@ describe('撤销栈', () => {
     const undone = undoHistory(pushHistory(createHistory(), 'old', 0), 'new')!
     const branched = pushHistory(undone.history, 'new', 10_000)
     expect(branched.future).toEqual([])
+  })
+})
+
+
+describe('tab keyboard routing', () => {
+  const right = { key: 'ArrowRight', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }
+  it('reorders only with Alt alone', () => {
+    expect(tabMoveStep(right)).toBe(1)
+    expect(tabMoveStep({ ...right, key: 'ArrowLeft' })).toBe(-1)
+    expect(tabMoveStep({ ...right, ctrlKey: true })).toBe(0)
+    expect(tabMoveStep({ ...right, metaKey: true })).toBe(0)
+    expect(tabMoveStep({ ...right, shiftKey: true })).toBe(0)
+    expect(tabMoveStep({ ...right, isComposing: true })).toBe(0)
   })
 })

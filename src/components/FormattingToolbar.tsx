@@ -5,6 +5,7 @@ import type { InlineFormat } from '../types'
 
 export interface RevisionControls {
   enabled: boolean
+  canInsert: boolean
   /** 全文还剩多少条修订，决定「接受 / 拒绝全部」是否可点。 */
   total: number
   onToggle: () => void
@@ -25,10 +26,10 @@ interface FormattingToolbarProps {
 export default function FormattingToolbar({ disabled = false, compact = false, revision, onFormat, onComment }: FormattingToolbarProps) {
   const { t } = useI18n()
   // inactive 是单个按钮自己的禁用条件：修订开关永远可点，标删除 / 插入要选区。
-  const action = (callback: () => void, inactive = false) => ({
+  const action = (callback: () => void, inactive = false, needsSelection = true) => ({
     onMouseDown: (event: React.MouseEvent) => event.preventDefault(),
     onClick: callback,
-    disabled: disabled || inactive,
+    disabled: (needsSelection && disabled) || inactive,
   })
   return (
     <div className={`formatting-toolbar ${compact ? 'is-compact' : ''} ${revision?.enabled ? 'is-revising' : ''}`}>
@@ -81,11 +82,11 @@ export default function FormattingToolbar({ disabled = false, compact = false, r
           {revision.enabled && (
             <>
               <button className="tool-button revision-mark" title={t('revision.markDelete')} {...action(revision.onMarkDelete)}><Minus size={17} /></button>
-              <button className="tool-button revision-mark" title={t('revision.insert')} {...action(revision.onInsert)}><PenLine size={17} /></button>
+              <button className="tool-button revision-mark" title={t('revision.insert')} {...action(revision.onInsert, !revision.canInsert, false)}><PenLine size={17} /></button>
               {!compact && (
                 <>
-                  <button className="tool-button revision-accept-all" title={t('revision.acceptAll')} {...action(revision.onAcceptAll, revision.total === 0)}><CheckCheck size={17} /></button>
-                  <button className="tool-button revision-reject-all" title={t('revision.rejectAll')} {...action(revision.onRejectAll, revision.total === 0)}><Undo2 size={17} /></button>
+                  <button className="tool-button revision-accept-all" title={t('revision.acceptAll')} {...action(revision.onAcceptAll, revision.total === 0, false)}><CheckCheck size={17} /></button>
+                  <button className="tool-button revision-reject-all" title={t('revision.rejectAll')} {...action(revision.onRejectAll, revision.total === 0, false)}><Undo2 size={17} /></button>
                 </>
               )}
             </>

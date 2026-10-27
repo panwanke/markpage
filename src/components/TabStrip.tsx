@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { FileText, Plus, X } from 'lucide-react'
 import { useI18n } from '../i18n'
 import { isContextMenuKey } from '../lib/keys'
+import { tabMoveStep } from '../lib/tabs'
 
 /**
  * 文档标签栏：点击切换、拖动排序、Alt+←/→ 键盘移位。
@@ -102,13 +103,10 @@ export default function TabStrip({ tabs, activeId, onSelect, onClose, onNew, onR
                     onContextMenu?.(tab.id, rect.left + 12, rect.bottom)
                     return
                   }
-                  if (!event.altKey) return
-                  if (event.key === 'ArrowLeft') {
+                  const step = tabMoveStep(event)
+                  if (step) {
                     event.preventDefault()
-                    onShift(tab.id, -1)
-                  } else if (event.key === 'ArrowRight') {
-                    event.preventDefault()
-                    onShift(tab.id, 1)
+                    onShift(tab.id, step)
                   }
                 }}
                 onContextMenu={(event) => {

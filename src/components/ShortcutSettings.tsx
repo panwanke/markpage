@@ -6,7 +6,7 @@ import {
   DEFAULT_KEYMAP,
   MENU_GROUPS,
   eventToBinding,
-  findConflict,
+  assignBinding,
   formatBinding,
   isValidBinding,
   setShortcutCapture,
@@ -41,8 +41,10 @@ export default function ShortcutSettings({ keymap, onChange }: ShortcutSettingsP
         setError(null)
         return
       }
-      // 退格 / 删除 = 清空这一条，不再占用任何键。
-      if (event.key === 'Backspace' || event.key === 'Delete') {
+      // 裸退格 / 删除 = 清空这一条，不再占用任何键。
+      // 带修饰键时必须当成键位来录：否则 Mod+Alt+Backspace 这类默认键位永远录不回来。
+      const bare = !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
+      if (bare && (event.key === 'Backspace' || event.key === 'Delete')) {
         onChange({ ...keymap, [recording]: '' })
         setRecording(null)
         setError(null)
@@ -54,12 +56,13 @@ export default function ShortcutSettings({ keymap, onChange }: ShortcutSettingsP
         setError({ id: recording, message: t('settings.shortcuts.invalid') })
         return
       }
-      const conflict = findConflict(keymap, recording, binding)
+      const result = assignBinding(keymap, recording, binding)
+      const conflict = result.conflict
       if (conflict) {
         setError({ id: recording, message: t('settings.shortcuts.conflict', { name: t(conflict.labelKey) }) })
         return
       }
-      onChange({ ...keymap, [recording]: binding })
+      onChange(result.keymap)
       setRecording(null)
       setError(null)
     }
@@ -131,8 +134,14 @@ export default function ShortcutSettings({ keymap, onChange }: ShortcutSettingsP
                       aria-label={t('settings.shortcuts.reset')}
                       disabled={binding === command.defaultBinding}
                       onClick={() => {
+                        const result = assignBinding(keymap, command.id, command.defaultBinding)
+                        if (result.conflict) {
+                          setError({ id: command.id, message: t('settings.shortcuts.conflict', { name: t(result.conflict.labelKey) }) })
+                          return
+                        }
                         setError(null)
-                        onChange({ ...keymap, [command.id]: command.defaultBinding })
+                        setRecording(null)
+                        onChange(result.keymap)
                       }}
                     >
                       <RotateCcw size={13} />

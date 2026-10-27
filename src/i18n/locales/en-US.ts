@@ -157,6 +157,7 @@ export const enUS: Messages = {
   'editor.splitDrag': 'Drag to resize the source pane, double-click to reset',
   'editor.sourceLabel': 'Markdown source',
 
+  'revision.invalidRange': 'This selection crosses revision markers, or the new text contains revision markup. Adjust the selection or accept/reject the existing revisions first.',
   'revision.toggleOn': 'Turn on track changes',
   'revision.toggleOff': 'Turn off track changes',
   'revision.markDelete': 'Mark as deleted (select text first)',

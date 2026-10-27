@@ -4,6 +4,9 @@ import {
   COMMANDS,
   DEFAULT_KEYMAP,
   bindingIndex,
+  assignBinding,
+  commandForKeyEvent,
+  setShortcutCapture,
   canonicalKey,
   eventToBinding,
   findConflict,
@@ -135,5 +138,43 @@ describe('输入框里的放行规则', () => {
     expect(isTextEntryTarget(editable)).toBe(true)
     expect(isTextEntryTarget(button)).toBe(false)
     expect(isTextEntryTarget(null)).toBe(false)
+  })
+})
+
+
+describe('custom shortcut regression cases', () => {
+  it('disables the redo alias after clearing or remapping redo', () => {
+    expect(bindingIndex({ ...DEFAULT_KEYMAP, 'edit.redo': '' }).has('Mod+Y')).toBe(false)
+    expect(bindingIndex({ ...DEFAULT_KEYMAP, 'edit.redo': 'Mod+K' }).has('Mod+Y')).toBe(false)
+    expect(bindingIndex(DEFAULT_KEYMAP).get('Mod+Y')).toBe('edit.redo')
+  })
+
+  it('rejects a single-command reset when the default key has been reassigned', () => {
+    const movedUndo = assignBinding(DEFAULT_KEYMAP, 'edit.undo', 'Mod+K').keymap
+    const movedBold = assignBinding(movedUndo, 'format.bold', 'Mod+Z').keymap
+    const resetUndo = assignBinding(movedBold, 'edit.undo', DEFAULT_KEYMAP['edit.undo'])
+    expect(resetUndo.conflict?.id).toBe('format.bold')
+    expect(resetUndo.keymap).toBe(movedBold)
+    expect(bindingIndex(resetUndo.keymap).get('Mod+Z')).toBe('format.bold')
+  })
+
+  it('does not execute an event already handled by a child, IME or recorder', () => {
+    const event = { ...key({ key: 'ArrowRight', altKey: true, ctrlKey: true }), defaultPrevented: true }
+    const index = bindingIndex(DEFAULT_KEYMAP)
+    expect(commandForKeyEvent(event, index)).toBeUndefined()
+    expect(commandForKeyEvent({ ...event, defaultPrevented: false }, index)).toBe('tabs.next')
+    expect(commandForKeyEvent({ ...event, defaultPrevented: false, isComposing: true }, index)).toBeUndefined()
+    setShortcutCapture(true)
+    try {
+      expect(commandForKeyEvent(key({ key: 'b', ctrlKey: true }), index)).toBeUndefined()
+    } finally {
+      setShortcutCapture(false)
+    }
+  })
+
+  it('rejects typing combinations and malformed stored bindings', () => {
+    expect(isValidBinding('Shift+B')).toBe(false)
+    expect(isValidBinding('Mod+nonsense')).toBe(false)
+    expect(isValidBinding('Mod+B+C')).toBe(false)
   })
 })

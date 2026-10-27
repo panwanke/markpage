@@ -246,21 +246,21 @@ export default function MarkdownDocument({
   function snapshotFromRange(range: Range): SelectionSnapshot | null {
     const start = locateSourceOffset(range.startContainer, range.startOffset)
     const end = locateSourceOffset(range.endContainer, range.endOffset)
-    if (start === null || end === null || start >= end) return null
+    if (start === null || end === null || start > end) return null
     const rect = range.getBoundingClientRect()
     return { text: range.toString(), start, end, top: rect.top, left: rect.left + rect.width / 2 }
   }
 
   function handleSelection() {
     const selection = window.getSelection()
-    if (!selection || selection.isCollapsed || !selection.rangeCount || !selection.toString().trim()) {
+    if (!selection || !selection.rangeCount || (!selection.isCollapsed && !selection.toString().trim())) {
       onSelection(null)
       return
     }
     const range = selection.getRangeAt(0)
     if (!viewportRef.current?.contains(range.commonAncestorContainer)) return
     const snapshot = snapshotFromRange(range)
-    onSelection(snapshot && snapshot.start < snapshot.end ? snapshot : null)
+    onSelection(snapshot)
   }
 
   /**
@@ -323,9 +323,7 @@ export default function MarkdownDocument({
       onMouseUp={handleSelection}
       onClick={handleRevisionClick}
       onContextMenu={handleContextMenu}
-      onMouseLeave={() => {
-        if (!window.getSelection()?.toString()) onSelection(null)
-      }}
+      onKeyUp={handleSelection}
     >
       {viewMode === 'paged' && (
         <div
