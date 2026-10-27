@@ -169,8 +169,14 @@ describe('最近文件', () => {
 
 describe('工作空间 id', () => {
   it('由目录名与时间派生，稳定且可读', () => {
-    expect(createWorkspaceId('My Notes', 1000)).toBe('ws-my-notes-rs')
-    expect(createWorkspaceId('中文目录', 1000)).toContain('ws-中文目录-')
-    expect(createWorkspaceId('***', 1000)).toBe('ws-folder-rs')
+    expect(createWorkspaceId('My Notes', 1000, 'abcd')).toBe('ws-my-notes-rs-abcd')
+    expect(createWorkspaceId('中文目录', 1000, 'abcd')).toContain('ws-中文目录-')
+    expect(createWorkspaceId('***', 1000, 'abcd')).toBe('ws-folder-rs-abcd')
+  })
+
+  it('同名目录在同一毫秒打开两次也不会撞 id', () => {
+    const a = createWorkspaceId('notes', 1000)
+    const b = createWorkspaceId('notes', 1000)
+    expect(a).not.toBe(b)
   })
 })

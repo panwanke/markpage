@@ -27,6 +27,7 @@ const state = vi.hoisted(() => ({
   created: [] as { root: string; path: string }[],
   writeFailure: new Set<string>(),
   scanGate: new Map<string, Promise<void>>(),
+  permissionGate: new Map<string, Promise<void>>(),
 }))
 
 vi.mock('../lib/localfs', async (importOriginal) => {
@@ -42,9 +43,11 @@ vi.mock('../lib/localfs', async (importOriginal) => {
     ...actual,
     supportsDirectoryPicker: () => true,
     pickDirectory: async () => (state.pick ? rootHandle(state.pick) : null),
-    queryPermission: async (handle: FakeHandle, mode: 'read' | 'readwrite' = 'readwrite') => (
-      mode === 'read' ? rootOf(handle).readPermission : rootOf(handle).writePermission
-    ) as PermissionStatus,
+    queryPermission: async (handle: FakeHandle, mode: 'read' | 'readwrite' = 'readwrite') => {
+      const gate = state.permissionGate.get(handle.root)
+      if (gate) await gate
+      return (mode === 'read' ? rootOf(handle).readPermission : rootOf(handle).writePermission) as PermissionStatus
+    },
     requestPermission: async (handle: FakeHandle, mode: 'read' | 'readwrite' = 'readwrite') => (
       mode === 'read' ? rootOf(handle).readPermission : rootOf(handle).writePermission
     ) as PermissionStatus,
@@ -178,6 +181,7 @@ beforeEach(() => {
   state.created.length = 0
   state.writeFailure.clear()
   state.scanGate.clear()
+  state.permissionGate.clear()
   state.pick = null
   host = document.createElement('div')
   document.body.append(host)
@@ -358,5 +362,135 @@ describe('工作空间会话', () => {
     // A 的扫描结果回来时令牌已经过期：会话必须还是 B。
     expect(api.session?.name).toBe('B')
     expect(api.session?.files.map((file) => file.path)).toEqual(['b.md'])
+  })
+
+  it('权限查询晚回来的旧根不会顶掉新切过去的根', async () => {
+    addRoot('A', { 'a.md': 'A' })
+    addRoot('B', { 'b.md': 'B' })
+    await mount()
+
+    let releaseA: () => void = () => undefined
+    state.permissionGate.set('A', new Promise<void>((resolve) => { releaseA = resolve }))
+
+    state.pick = 'A'
+    const opening = api.openFolder()
+    await settle()
+    // A 还卡在权限查询上，会话没建立；这时切到 B 并让它先完成。
+    expect(api.session).toBeNull()
+    await openFolder('B')
+    expect(api.session?.name).toBe('B')
+
+    releaseA()
+    await act(async () => { await opening })
+    // A 的权限结果晚回来：令牌已经过期，不许再 applySession。
+    expect(api.session?.name).toBe('B')
+    expect(api.session?.files.map((file) => file.path)).toEqual(['b.md'])
+  })
+
+  it('显式另存到已绑定路径时先比对磁盘，不静默覆盖外部改动', async () => {
+    addRoot('A', { 'a.md': '原始内容' })
+    await mount()
+    await openFolder('A')
+
+    const bound = makeDoc('doc-1', '我的改动',
+      { kind: 'workspace', workspaceId: api.session!.id, path: 'a.md' },
+      { hash: hashContent('原始内容'), lastModified: 1 })
+    store.documents = [bound]
+    // 另一个编辑器改了文件，然后用户点「保存到磁盘」。
+    state.roots.get('A')!.files.set('a.md', { content: '外部改动', lastModified: 2 })
+
+    let ok: boolean | undefined
+    await act(async () => { ok = await api.saveToDisk(bound) })
+
+    expect(ok).toBe(false)
+    expect(state.roots.get('A')!.files.get('a.md')!.content).toBe('外部改动')
+    expect(state.created).toHaveLength(0)
+    expect(api.conflicts.get('doc-1')?.diskMarkdown).toBe('外部改动')
+    expect(api.diskStates.get('doc-1')).toBe('conflict')
+  })
+
+  it('删除文档后磁盘状态与待写队列一起清掉，关标签不再误报未保存', async () => {
+    addRoot('A', { 'a.md': '原文' })
+    await mount()
+    await openFolder('A')
+
+    const bound = makeDoc('doc-1', '改过',
+      { kind: 'workspace', workspaceId: api.session!.id, path: 'a.md' },
+      { hash: hashContent('原文'), lastModified: 1 })
+    store.documents = [bound]
+    state.writeFailure.add('a.md')
+    await act(async () => { api.enqueueWrite(bound) })
+    await act(async () => { await api.flush(api.session!.id) })
+    expect(api.diskStates.get('doc-1')).toBe('error')
+    expect(api.hasPendingWrites()).toBe(false)
+
+    // 再失败一次：提示只该出现一次，不能每 600ms 弹一条。
+    await act(async () => { api.enqueueWrite(bound) })
+    await act(async () => { await api.flush(api.session!.id) })
+    expect(store.notes.filter((note) => note === 'localfs.writeFailed')).toHaveLength(1)
+
+    // App 删除文档的顺序：先 releaseDocument（还要靠绑定删句柄），再摘出列表。
+    await act(async () => { api.enqueueWrite(bound) })
+    expect(api.diskStates.get('doc-1')).toBe('pending')
+    store.documents = []
+    await act(async () => { api.releaseDocument('doc-1') })
+
+    expect(api.diskStates.has('doc-1')).toBe(false)
+    expect(api.hasPendingWrites()).toBe(false)
+  })
+
+  it('写盘排队期间文档被删掉，状态不会永久挂成待写入', async () => {
+    addRoot('A', { 'a.md': '原文' })
+    await mount()
+    await openFolder('A')
+
+    const bound = makeDoc('doc-1', '改过',
+      { kind: 'workspace', workspaceId: api.session!.id, path: 'a.md' },
+      { hash: hashContent('原文'), lastModified: 1 })
+    store.documents = [bound]
+
+    // 防抖没到就把文档删了（且没走 releaseDocument 这种「正门」）。
+    vi.useFakeTimers()
+    try {
+      await act(async () => { api.enqueueWrite(bound) })
+      expect(api.diskStates.get('doc-1')).toBe('pending')
+      store.documents = []
+      await act(async () => { await vi.advanceTimersByTimeAsync(700) })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    // 状态若留在队列里，hasPendingWrites() 会一直是 true，之后每次关标签都误报。
+    expect(api.diskStates.has('doc-1')).toBe(false)
+    expect(api.hasPendingWrites()).toBe(false)
+  })
+
+  it('重新载入对齐后冲突解除，后续改动能继续写回', async () => {
+    addRoot('A', { 'a.md': '原始内容' })
+    await mount()
+    await openFolder('A')
+
+    const bound = makeDoc('doc-1', '我的改动',
+      { kind: 'workspace', workspaceId: api.session!.id, path: 'a.md' },
+      { hash: hashContent('原始内容'), lastModified: 1 })
+    store.documents = [bound]
+    state.roots.get('A')!.files.set('a.md', { content: '外部改动', lastModified: 2 })
+    await act(async () => { api.enqueueWrite(bound) })
+    await act(async () => { await api.flush(api.session!.id) })
+    expect(api.diskStates.get('doc-1')).toBe('conflict')
+
+    // 「从磁盘重新载入」= 正文换成磁盘版本 + markSynced。
+    const diskBaseline = { hash: hashContent('外部改动'), lastModified: 2 }
+    store.documents = [{ ...bound, markdown: '外部改动', diskBaseline }]
+    await act(async () => { api.markSynced('doc-1', diskBaseline) })
+    expect(api.conflicts.has('doc-1')).toBe(false)
+
+    store.documents = [{ ...store.documents[0], markdown: '外部改动 + 我的' }]
+    await act(async () => { api.enqueueWrite(store.documents[0]) })
+    await act(async () => { await api.flush(api.session!.id) })
+
+    // 旧冲突若没清掉，这次会被 conflictsRef 拦回去，什么都不写。
+    expect(state.writes.at(-1)).toEqual({ root: 'A', path: 'a.md', content: '外部改动 + 我的' })
+    expect(api.diskStates.get('doc-1')).toBe('clean')
   })
 })

@@ -3,8 +3,8 @@ import { FilePlus2, FileText, FolderOpen, HardDrive, History, RefreshCw, ShieldC
 import DocumentMenu from '../DocumentMenu'
 import type { DocumentMenuActions } from '../DocumentMenu'
 import { isContextMenuKey } from '../../lib/keys'
+import { DISK_STATE_LABELS } from '../../lib/disk'
 import { useI18n } from '../../i18n'
-import type { MessageKey } from '../../i18n'
 import type { DiskState, MarkdownDocument } from '../../types'
 
 export interface WorkspaceView {
@@ -15,8 +15,6 @@ export interface WorkspaceView {
   scanning?: boolean
   /** 目录已不可访问（被移动 / 删除 / 权限撤销）。 */
   invalid?: boolean
-  /** 只读且需要用户点一下授权。 */
-  needsPermission?: boolean
   files: { path: string; title: string }[]
 }
 
@@ -52,15 +50,6 @@ interface MenuState {
   id: string
   x: number
   y: number
-}
-
-const DISK_LABELS: Record<DiskState, MessageKey> = {
-  clean: 'localfs.diskClean',
-  pending: 'localfs.diskPending',
-  writing: 'localfs.diskWriting',
-  readonly: 'localfs.diskReadonly',
-  error: 'localfs.diskError',
-  conflict: 'localfs.diskConflict',
 }
 
 export default function WorkspacePanel({
@@ -234,7 +223,7 @@ export default function WorkspacePanel({
                     {document.binding && <HardDrive size={11} className="document-local-badge" />}
                   </small>
                   {document.binding && diskState && (
-                    <small className={`disk-state is-${diskState}`}>{t(DISK_LABELS[diskState])}</small>
+                    <small className={`disk-state is-${diskState}`}>{t(DISK_STATE_LABELS[diskState])}</small>
                   )}
                 </span>
               )}

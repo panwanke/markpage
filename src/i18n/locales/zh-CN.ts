@@ -121,6 +121,7 @@ export const zhCN = {
   'localfs.saveFailed': '保存到磁盘失败，改动仍留在浏览器里',
   'localfs.unbound': '已解除与磁盘文件的绑定',
   'localfs.reloaded': '已从磁盘重新载入「{name}」',
+  'localfs.unflushedKept': '「{name}」还有改动没写入磁盘，先保留浏览器里的版本',
   'localfs.copiedPath': '已复制路径：{path}',
   'localfs.dropBound': '已绑定磁盘文件「{name}」，改动会写回原文件',
   'localfs.switchUnflushed': '有改动还没写入磁盘。继续会把这些改动保留在浏览器里，确定继续？',

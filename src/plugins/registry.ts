@@ -48,6 +48,15 @@ export class PluginRegistry {
     return this.plugins.has(pluginId)
   }
 
+  /**
+   * 一轮同步（应用启用集合）跑完。
+   * 即使什么都没注册也要让版本号动一次：宿主靠版本号判断「启停已经生效」，
+   * 启用列表里的 id 全都不存在时也不会一直等下去。
+   */
+  commitSync() {
+    this.bump()
+  }
+
   activate(plugin: MarkPagePlugin, getDocument: MarkPagePluginAPI['getDocument']) {
     if (this.plugins.has(plugin.id)) return
     const record: PluginRecord = {
@@ -90,9 +99,15 @@ export class PluginRegistry {
       },
       getDocument,
     }
-    const cleanup = plugin.activate(api)
-    if (typeof cleanup === 'function') record.cleanup = cleanup
+    // 先把记录登记掉再跑插件代码：activate 抛错时这个插件仍算「已挂载」，
+    // 靠 deactivate 的兜底摘除就能清理干净，不会留下取不到的孤儿注册项。
     this.plugins.set(plugin.id, record)
+    try {
+      const cleanup = plugin.activate(api)
+      if (typeof cleanup === 'function') record.cleanup = cleanup
+    } catch {
+      // 插件自己的初始化出错不该拖垮宿主，用户可以在设置里把它关掉。
+    }
     this.bump()
   }
 

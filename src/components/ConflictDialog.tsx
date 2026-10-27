@@ -1,6 +1,5 @@
 import { FileDiff } from 'lucide-react'
 import { useI18n } from '../i18n'
-import { useEscape } from '../lib/useEscape'
 
 interface ConflictDialogProps {
   name: string
@@ -8,18 +7,19 @@ interface ConflictDialogProps {
   bothChanged: boolean
   onUseDisk: () => void
   onSaveCopy: () => void
-  onClose: () => void
 }
 
 /**
  * 写盘冲突：磁盘上的文件已经不是上次写入的版本。
- * 这里只给两条出口 —— 采用磁盘，或把浏览器副本另存成新文件；不做「静默覆盖」。
+ *
+ * 只给两条出口 —— 采用磁盘，或把浏览器副本另存成新文件；不做「静默覆盖」，
+ * 也不提供「关掉先不管」：在做出选择前自动写回一直是暂停的，留一个能被 Esc
+ * 关掉、关掉后又没有任何入口回来的弹窗，比不给关闭更误导。
  */
-export default function ConflictDialog({ name, bothChanged, onUseDisk, onSaveCopy, onClose }: ConflictDialogProps) {
+export default function ConflictDialog({ name, bothChanged, onUseDisk, onSaveCopy }: ConflictDialogProps) {
   const { t } = useI18n()
-  useEscape(onClose)
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="modal-backdrop">
       <section className="dialog conflict-dialog" role="dialog" aria-modal="true" aria-label={t('localfs.conflictTitle')}>
         <div className="dialog-heading">
           <span className="dialog-icon is-warning"><FileDiff size={18} /></span>

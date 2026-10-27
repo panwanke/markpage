@@ -98,10 +98,8 @@ import { useWorkspace } from './hooks/useWorkspace'
 import { useBuiltinPlugins } from './hooks/useBuiltinPlugins'
 import WorkspaceDialog from './components/WorkspaceDialog'
 import ConflictDialog from './components/ConflictDialog'
-import { OBSIDIAN_LIVE_EDITING_PLUGIN_ID } from './plugins/ids'
 import type { PluginEditorHandle } from './plugins/types'
 import { useI18n } from './i18n'
-import type { MessageKey } from './i18n'
 import {
   ALLOWED_WHILE_TYPING,
   COMMANDS,
@@ -117,7 +115,6 @@ import { createHistory, pushHistory, redoHistory, undoHistory } from './lib/hist
 import type { DocumentHistory } from './lib/history'
 import { moveTab, reorderOpenDocuments, shiftTab } from './lib/tabs'
 import type {
-  DiskState,
   EditorMode,
   InlineFormat,
   MarkdownDocument as MarkdownDoc,
@@ -126,17 +123,8 @@ import type {
   SelectionSnapshot,
 } from './types'
 import { isPluginEditorMode, pluginEditorMode } from './types'
+import { DISK_STATE_LABELS, makeBaseline } from './lib/disk'
 import './App.css'
-
-/** 磁盘状态 → 文案。缓存状态（saveState）与磁盘状态必须分开显示。 */
-const DISK_STATE_LABELS: Record<DiskState, MessageKey> = {
-  clean: 'localfs.diskClean',
-  pending: 'localfs.diskPending',
-  writing: 'localfs.diskWriting',
-  readonly: 'localfs.diskReadonly',
-  error: 'localfs.diskError',
-  conflict: 'localfs.diskConflict',
-}
 
 export default function App() {
   const { t, setLocale: changeLocale } = useI18n()
@@ -317,6 +305,21 @@ export default function App() {
     })
   }, [documents, enqueueWrite])
 
+  /**
+   * 刷新后补写。
+   *
+   * 上面的 effect 只在文档变化时跑，而首次挂载时保存的 session 还是 null（恢复是异步的），
+   * enqueueWrite 直接返回、什么都没排。等会话恢复（或刚授到写入权限）后文档没变、
+   * 那个 effect 不会重跑 —— 上次关闭前没落盘的改动就会一直停在浏览器里，界面上却看不出来。
+   * 所以「能不能写」一变就重新排一次（干净的文档会被 enqueueWrite 的哈希比较筛掉）。
+   */
+  const writeArmKey = `${workspace.session?.id ?? ''}:${workspace.session?.writePermission ?? ''}`
+  useEffect(() => {
+    documentsRef.current.forEach((document) => {
+      if (document.binding) enqueueWrite(document)
+    })
+  }, [writeArmKey, enqueueWrite])
+
   const activeDiskState = activeDocument ? workspace.diskStates.get(activeDocument.id) : undefined
   const activeConflict = activeDocument ? workspace.conflicts.get(activeDocument.id) : undefined
   /** 当前根如果只读，最近列表里也要标出来，别让用户点了才发现打不开。 */
@@ -341,6 +344,8 @@ export default function App() {
   const pluginMode = isPluginEditorMode(mode)
     ? editorModes.find((entry) => pluginEditorMode(entry.pluginId) === mode)
     : undefined
+  /** 选中了插件模式，不论组件是否已就绪：渲染分支只认它，不能退回纸张 + 源码双栏。 */
+  const pluginModeActive = isPluginEditorMode(mode)
 
   // 插件被停用（或设置里留着已经失效的模式）时安全回退：清选区、卸载编辑器、正文不变。
   useEffect(() => {
@@ -691,6 +696,9 @@ export default function App() {
     const name = displayName(target)
     if (!window.confirm(t('workspace.deleteConfirm', { name }))) return
     historyRef.current.delete(id)
+    // 先释放再移除：releaseDocument 还要靠文档里的绑定去删外部文件句柄，
+    // 同时把写盘队列、冲突与磁盘状态一并清掉（否则关标签会一直误报未保存）。
+    workspace.releaseDocument(id)
     const remaining = documents.filter((document) => document.id !== id)
     if (!remaining.length) {
       const fallback = createDocument()
@@ -770,7 +778,7 @@ export default function App() {
     if (!target?.binding) return
     const file = await workspace.readBoundFile(target)
     if (!file) return
-    const baseline = { hash: hashContent(file.content), lastModified: file.lastModified }
+    const baseline = makeBaseline(file.content, file.lastModified)
     historyRef.current.delete(id)
     setDocuments((current) => current.map((document) => (
       document.id === id
@@ -892,7 +900,7 @@ export default function App() {
         notify(t('localfs.readFailed', { name: path }))
         continue
       }
-      const baseline = { hash: hashContent(content), lastModified }
+      const baseline = makeBaseline(content, lastModified)
       const existing = await findExternalDocument(entry.handle, path)
       if (existing) {
         // 之前拖过同一个文件：以磁盘上的内容为准，旧的撤销栈不再有意义。
@@ -986,9 +994,21 @@ export default function App() {
       workspace.recordRecentFile({ workspaceId, documentId: existing.id, path, title: displayName(existing) })
       return
     }
+    if (existing) {
+      // 关掉标签不代表改动已经落盘：防抖还没到就重新打开的话，
+      // 下面的「以磁盘内容为准」会把这段输入静默盖掉。先把绑定文档写干净。
+      const synced = existing.diskBaseline?.hash === hashContent(existing.markdown)
+      if (!synced && !(await workspace.flush(workspaceId))) {
+        // 写不干净（只读 / 冲突）：宁可保留浏览器副本，也不拿磁盘旧内容覆盖它。
+        openDocument(existing.id)
+        workspace.recordRecentFile({ workspaceId, documentId: existing.id, path, title: displayName(existing) })
+        notify(t('localfs.unflushedKept', { name: displayName(existing) }))
+        return
+      }
+    }
     const file = await workspace.readWorkspaceFile(workspaceId, path)
     if (!file) return
-    const baseline = { hash: hashContent(file.content), lastModified: file.lastModified }
+    const baseline = makeBaseline(file.content, file.lastModified)
     if (existing) {
       // 之前开过后来关掉了：以磁盘上的最新内容为准，旧的撤销栈不再有意义。
       historyRef.current.delete(existing.id)
@@ -1395,8 +1415,8 @@ export default function App() {
               {/* 插件注册的编辑模式：按钮完全由注册表派生，停用后自然消失。 */}
               {editorModes.map((entry) => {
                 const value = pluginEditorMode(entry.pluginId)
-                const label = entry.pluginId === OBSIDIAN_LIVE_EDITING_PLUGIN_ID ? t('editor.liveEditing') : entry.title
-                const hint = entry.pluginId === OBSIDIAN_LIVE_EDITING_PLUGIN_ID ? t('editor.liveEditingHint') : entry.description
+                const label = entry.titleKey ? t(entry.titleKey) : entry.title
+                const hint = entry.descriptionKey ? t(entry.descriptionKey) : entry.description
                 return (
                   <button key={value} className={mode === value ? 'active' : ''} onClick={() => switchMode(value)} title={hint}>
                     <FileDiff size={15} />{label}
@@ -1421,7 +1441,7 @@ export default function App() {
           </div>
 
           <div className={`editor-content mode-${pluginMode ? 'plugin' : mode}`}>
-            {mode !== 'source' && !pluginMode && (
+            {mode !== 'source' && !pluginModeActive && (
               <div className="editor-pane">
                 <MarkdownDocument
                   markdown={markdown}
@@ -1440,30 +1460,34 @@ export default function App() {
                 />
               </div>
             )}
-            {pluginMode && (
+            {pluginModeActive && (
               <div className="editor-pane is-plugin">
-                {/* 插件可以按需加载自己的实现（Live Editing 的 CodeMirror 就是），
-                    空档期不该是一片空白。 */}
-                <Suspense fallback={<div className="plugin-editor-loading">{t('editor.pluginLoading')}</div>}>
-                  <pluginMode.component
-                    key={activeDocument.id}
-                    ref={pluginEditorRef}
-                    documentId={activeDocument.id}
-                    markdown={markdown}
-                    revisionMode={settings.revisionMode}
-                    keymap={keymap}
-                    commitEdit={commitPluginEdit}
-                    onSelection={handlePluginSelection}
-                    onCommand={(id, target) => {
-                      if (!commandEnabled(id, target)) return false
-                      executeCommand(id, target)
-                      return true
-                    }}
-                  />
-                </Suspense>
+                {/* 插件可以按需加载自己的实现（Live Editing 的 CodeMirror 就是），空档期不该是一片空白。
+                    注册表还没同步完时也只显示这层占位：退回纸张 + 源码栏会出现幽灵双栏。 */}
+                {pluginMode ? (
+                  <Suspense fallback={<div className="plugin-editor-loading">{t('editor.pluginLoading')}</div>}>
+                    <pluginMode.component
+                      key={activeDocument.id}
+                      ref={pluginEditorRef}
+                      documentId={activeDocument.id}
+                      markdown={markdown}
+                      revisionMode={settings.revisionMode}
+                      keymap={keymap}
+                      commitEdit={commitPluginEdit}
+                      onSelection={handlePluginSelection}
+                      onCommand={(id, target) => {
+                        if (!commandEnabled(id, target)) return false
+                        executeCommand(id, target)
+                        return true
+                      }}
+                    />
+                  </Suspense>
+                ) : (
+                  <div className="plugin-editor-loading">{t('editor.pluginLoading')}</div>
+                )}
               </div>
             )}
-            {mode !== 'rendered' && !pluginMode && (
+            {mode !== 'rendered' && !pluginModeActive && (
               <>
                 {mode === 'split' && (
                   <div
@@ -1598,7 +1622,6 @@ export default function App() {
           bothChanged={activeConflict.browserChanged}
           onUseDisk={() => void workspace.resolveConflict(activeDocument.id, 'disk')}
           onSaveCopy={() => void workspace.resolveConflict(activeDocument.id, 'copy')}
-          onClose={() => undefined}
         />
       )}
       {modal === 'settings' && <SettingsModal

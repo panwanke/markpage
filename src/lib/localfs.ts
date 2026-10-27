@@ -93,16 +93,6 @@ export async function requestPermission(
   }
 }
 
-/** 写权限要用户点一下才算数，重新打开页面后通常需要再确认一次。 */
-export async function requestWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
-  return (await requestPermission(handle, 'readwrite')) === 'granted'
-}
-
-/** 只查询不申请：刷新页面时不该突然弹权限框。 */
-export async function hasWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
-  return (await queryPermission(handle, 'readwrite')) === 'granted'
-}
-
 /** 两个句柄是不是同一个条目：同一目录再次打开时用它复用工作空间 id。 */
 export async function isSameEntry(a: FileSystemHandle, b: FileSystemHandle): Promise<boolean> {
   const target = a as unknown as { isSameEntry?: (other: FileSystemHandle) => Promise<boolean> }
@@ -161,11 +151,6 @@ export async function scanDirectory(
 
   await walk(root, '', 1)
   return { entries: entries.sort((a, b) => comparePaths(a.path, b.path)), truncated }
-}
-
-export async function readLocalFile(handle: FileSystemFileHandle) {
-  const file = await handle.getFile()
-  return file.text()
 }
 
 /** 读内容 + 文件自身的 lastModified：写盘前拿它和基准比较，判断外部有没有改过。 */
@@ -336,8 +321,6 @@ export function workspaceRootKey(workspaceId: string) {
 export function externalFileKey(documentId: string) {
   return `external-file:${documentId}`
 }
-
-export const LEGACY_WORKSPACE_HANDLE_KEY = LEGACY_FOLDER_KEY
 
 function openDatabase(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)

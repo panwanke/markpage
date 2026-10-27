@@ -123,6 +123,7 @@ export const enUS: Messages = {
   'localfs.saveFailed': 'Could not save to disk, changes stay in this browser',
   'localfs.unbound': 'Unlinked from the file on disk',
   'localfs.reloaded': 'Reloaded “{name}” from disk',
+  'localfs.unflushedKept': '“{name}” still has edits that are not on disk, so the browser copy was kept',
   'localfs.copiedPath': 'Copied path: {path}',
   'localfs.dropBound': 'Linked to “{name}” on disk, edits write back to it',
   'localfs.switchUnflushed': 'Some edits are not on disk yet. They will stay in the browser if you continue. Continue?',

@@ -12,6 +12,9 @@ export const liveEditingMode: PluginEditorMode = {
   pluginId: OBSIDIAN_LIVE_EDITING_PLUGIN_ID,
   title: '实时',
   description: '单一连续视图：非活动行即时排版，当前行显示 Markdown 标记',
+  // 这几个按钮在宿主里已有译文，给键名就让宿主直接取，不必按插件 id 写专用分支。
+  titleKey: 'editor.liveEditing',
+  descriptionKey: 'editor.liveEditingHint',
   component: LivePreviewEditorEntry,
 }
 

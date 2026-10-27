@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { hashContent } from '../lib/hash'
+import { makeBaseline } from '../lib/disk'
 import {
   createLocalFile,
   deleteHandle,
@@ -111,6 +112,8 @@ export function useWorkspace(options: UseWorkspaceOptions) {
   const inFlightRef = useRef(new Map<string, Promise<void>>())
   /** performWrite 里要重新排队（写盘期间又有新输入），用 ref 断开循环依赖。 */
   const scheduleWriteRef = useRef<(id: string) => void>(() => undefined)
+  /** 已经提示过写盘失败的文档：失败状态没解开之前不重复弹提示。 */
+  const writeFailedRef = useRef(new Set<string>())
 
   const applySession = useCallback((next: WorkspaceSession | null) => {
     sessionRef.current = next
@@ -161,9 +164,22 @@ export function useWorkspace(options: UseWorkspaceOptions) {
   /** 真正写一次盘。所有失败路径都必须把改动留在浏览器里。 */
   const performWrite = useCallback(async (id: string) => {
     const doc = optionsRef.current.getDocuments().find((item) => item.id === id)
-    if (!doc?.binding) return
+    if (!doc?.binding) {
+      // 文档被删掉（或解除了绑定）：队列里可能还留着它的状态。
+      // 不清掉的话 hasPendingWrites() 会一直为真，之后每次关标签都误报「未保存」。
+      dropDiskState(id)
+      return
+    }
     const binding = doc.binding
     const { notify, t, patchDocument } = optionsRef.current
+    /** 同一个失败原因只提示一次：失败源（文件被删 / 权限撤销）不会自己好，
+     *  每 600ms 弹一次 2.2 秒的提示会连成一片。写成功后才允许再报。 */
+    const reportFailure = () => {
+      if (writeFailedRef.current.has(id)) return
+      writeFailedRef.current.add(id)
+      notify(t('localfs.writeFailed', { name: doc.name || binding.path }))
+    }
+    const reportSuccess = () => { writeFailedRef.current.delete(id) }
 
     if (binding.kind === 'workspace') {
       const current = sessionRef.current
@@ -178,7 +194,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
     const handle = await resolveHandle(binding)
     if (!handle) {
       setDiskState(id, 'error')
-      notify(t('localfs.writeFailed', { name: doc.name || binding.path }))
+      reportFailure()
       return
     }
 
@@ -188,6 +204,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
     // 内容和基准一致：没有需要写的东西，别为了「确认」反复落盘。
     if (baseline && baseline.hash === hash) {
       setDiskState(id, 'clean')
+      reportSuccess()
       return
     }
 
@@ -204,11 +221,13 @@ export function useWorkspace(options: UseWorkspaceOptions) {
             browserChanged: hash !== baseline.hash,
           }, id)
           setDiskState(id, 'conflict')
+          reportSuccess()
           notify(t('localfs.conflict', { name: doc.name || binding.path }))
           return
         }
       }
       await writeLocalFile(handle, content)
+      reportSuccess()
       let lastModified = Date.now()
       try {
         lastModified = (await handle.getFile()).lastModified
@@ -226,9 +245,9 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       }
     } catch {
       setDiskState(id, 'error')
-      notify(t('localfs.writeFailed', { name: doc.name || binding.path }))
+      reportFailure()
     }
-  }, [resolveHandle, setConflict, setDiskState])
+  }, [dropDiskState, resolveHandle, setConflict, setDiskState])
 
   /** 同一篇文档的写入串行化：后一次排队等前一次结束，避免两次写交错。 */
   const requestWrite = useCallback((id: string): Promise<void> => {
@@ -309,7 +328,10 @@ export function useWorkspace(options: UseWorkspaceOptions) {
     const token = scanTokenRef.current + 1
     scanTokenRef.current = token
     const readPermission = await queryPermission(input.handle, 'read')
+    if (token !== scanTokenRef.current) return null
     const writePermission = input.writePermission ?? await queryPermission(input.handle, 'readwrite')
+    // 权限查询也是异步的：并发开根时晚回来的旧结果不许把新 session 顶掉。
+    if (token !== scanTokenRef.current) return null
     const base: WorkspaceSession = {
       id: input.id,
       name: input.name,
@@ -497,6 +519,31 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       ? document.binding.path
       : undefined
     const candidate = boundPath ?? sanitizeFileName(document.name.trim() || t('document.untitled'))
+
+    // 覆盖自己绑定过的路径之前，先确认磁盘没被外部改过。
+    // 否则「显式保存」就成了绕过冲突检测的后门，而自动写回恰恰禁止这种情况。
+    if (boundPath && document.diskBaseline) {
+      const handle = await resolvePathHandle(current.handle, boundPath)
+      if (handle) {
+        try {
+          const info = await readLocalFileWithInfo(handle)
+          if (hashContent(info.content) !== document.diskBaseline.hash) {
+            setConflict({
+              documentId: document.id,
+              diskMarkdown: info.content,
+              diskLastModified: info.lastModified,
+              browserChanged: hashContent(document.markdown) !== document.diskBaseline.hash,
+            }, document.id)
+            setDiskState(document.id, 'conflict')
+            notify(t('localfs.conflict', { name: document.name || boundPath }))
+            return false
+          }
+        } catch {
+          // 读不到（文件已被删掉等）：继续走覆盖写，由 createLocalFile 给出结果。
+        }
+      }
+    }
+
     try {
       const { path, handle } = await createLocalFile(current.handle, candidate, document.markdown, {
         overwrite: Boolean(boundPath),
@@ -507,7 +554,9 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       } catch {
         // 时间取不到不影响绑定。
       }
-      const baseline: DiskBaseline = { hash: hashContent(document.markdown), lastModified }
+      const baseline: DiskBaseline = makeBaseline(document.markdown, lastModified)
+      writeFailedRef.current.delete(document.id)
+      setConflict(null, document.id)
       patchDocument(document.id, {
         binding: { kind: 'workspace', workspaceId: current.id, path },
         diskBaseline: baseline,
@@ -520,7 +569,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       notify(t('localfs.saveFailed'))
       return false
     }
-  }, [refresh, setDiskState])
+  }, [refresh, setConflict, setDiskState])
 
   /** 拖进来的单文件：句柄按文档 id 存，和工作空间完全解耦。 */
   const bindExternalFile = useCallback(async (documentId: string, handle: FileSystemFileHandle, path: string): Promise<DocumentBinding> => {
@@ -536,16 +585,21 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       window.clearTimeout(timer)
       timersRef.current.delete(documentId)
     }
+    writeFailedRef.current.delete(documentId)
     setConflict(null, documentId)
     dropDiskState(documentId)
     const doc = optionsRef.current.getDocuments().find((item) => item.id === documentId)
     if (doc?.binding?.kind === 'external') void deleteHandle(doc.binding.handleKey)
   }, [dropDiskState, setConflict])
 
+  /** 正文已经和磁盘对齐（重新载入 / 拖入同一个文件）：冲突随之解除。 */
   const markSynced = useCallback((documentId: string, baseline: DiskBaseline) => {
     optionsRef.current.patchDocument(documentId, { diskBaseline: baseline })
+    writeFailedRef.current.delete(documentId)
+    // 不清冲突的话，这个文档之后每次 enqueueWrite 都会被 conflictsRef 拦回 conflict 状态。
+    setConflict(null, documentId)
     setDiskState(documentId, 'clean')
-  }, [setDiskState])
+  }, [setConflict, setDiskState])
 
   /** 冲突只有两条出口：采用磁盘，或把浏览器副本另存成新文件。 */
   const resolveConflict = useCallback(async (documentId: string, choice: 'disk' | 'copy') => {
@@ -557,7 +611,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
     if (choice === 'disk') {
       replaceMarkdown(documentId, conflict.diskMarkdown)
       patchDocument(documentId, {
-        diskBaseline: { hash: hashContent(conflict.diskMarkdown), lastModified: conflict.diskLastModified },
+        diskBaseline: makeBaseline(conflict.diskMarkdown, conflict.diskLastModified),
       })
       setConflict(null, documentId)
       setDiskState(documentId, 'clean')
@@ -577,7 +631,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
         }
         patchDocument(documentId, {
           binding: { kind: 'workspace', workspaceId: current.id, path },
-          diskBaseline: { hash: hashContent(doc.markdown), lastModified },
+          diskBaseline: makeBaseline(doc.markdown, lastModified),
         })
         setConflict(null, documentId)
         setDiskState(documentId, 'clean')

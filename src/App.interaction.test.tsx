@@ -316,4 +316,14 @@ describe('Obsidian Live Editing plugin', () => {
     expect(host.querySelector('.live-preview-editor')).toBeNull()
     expect(host.querySelector('.paper-page')).toBeTruthy()
   })
+
+  it('启用的插件全都不存在时，失效的插件模式也会回退（同步不依赖注册表变更）', async () => {
+    // 这一轮同步什么都注册不了：若「已同步」靠版本号递增来推断，它会永远停在 false，
+    // 回退 effect 不再执行，失效模式就常驻了。
+    await mountWith({ editorMode: LIVE_MODE, enabledPluginIds: ['markpage.removed-plugin'] })
+    expect(host.querySelector('.live-preview-editor')).toBeNull()
+    expect(host.querySelector('.paper-page')).toBeTruthy()
+    // 只渲染一种视图：不允许纸张与源码栏同时存在（幽灵双栏）。
+    expect(host.querySelector('.source-editor')).toBeNull()
+  })
 })

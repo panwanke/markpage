@@ -32,14 +32,18 @@ export function useBuiltinPlugins({ enabledPluginIds, getDocument }: UseBuiltinP
       if (enabled.has(plugin.id)) registry.activate(plugin, () => getDocumentRef.current())
       else registry.deactivate(plugin.id)
     }
+    registry.commitSync()
   }, [enabledPluginIds, registry])
 
   useEffect(() => () => registry.dispose(), [registry])
 
   /**
    * 插件是否已经同步过一轮。
-   * 用注册表版本号推断，而不是 effect 里 setState —— 少一次级联渲染，
-   * 也避免「首次同步前误判插件模式失效」把用户的模式回退掉。
+   *
+   * 用注册表版本号推断，而不是 effect 里 setState —— 少一次级联渲染。
+   * 为此每次同步结束都让版本号动一次（`commitSync`）：设置里启用的 id 全都不对应内置插件时
+   * 这一轮什么都注册不了，若没有这次自增，版本号会永远停在 0、synced 永久 false，
+   * 「插件模式失效就回退」的 effect 便再也不执行，失效模式会常驻。
    */
   const synced = version > 0 || enabledPluginIds.length === 0
 

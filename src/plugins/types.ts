@@ -1,5 +1,6 @@
 import type { ComponentType, Ref } from 'react'
 import type { Root } from 'hast'
+import type { MessageKey } from '../i18n'
 import type { CommandId, Keymap } from '../lib/shortcuts'
 import type { SelectionSnapshot } from '../types'
 
@@ -48,6 +49,9 @@ export interface PluginEditorMode {
   title: string
   /** 无障碍与按钮 title 用的说明。 */
   description: string
+  /** 可选：界面里已经有这份文案时用它，宿主就不必为某个插件写专用分支。 */
+  titleKey?: MessageKey
+  descriptionKey?: MessageKey
   component: ComponentType<PluginEditorProps & { ref?: Ref<PluginEditorHandle> }>
 }
 

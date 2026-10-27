@@ -200,12 +200,16 @@ export function removeWorkspace(state: WorkspaceStoreState, workspaceId: string)
   }
 }
 
-/** 工作空间 id：目录名 + 时间戳，稳定、可读，不依赖句柄。 */
-export function createWorkspaceId(name: string, now = Date.now()): string {
+/**
+ * 工作空间 id：目录名 + 时间戳 + 一小段随机，稳定、可读，不依赖句柄。
+ * 末尾的随机段不是装饰：只有「名字 + 毫秒」时，同一毫秒内打开两个同名目录
+ * （批量恢复、拖放多个目录）会撞出同一个 id，后一个根句柄会覆盖前一个的记录。
+ */
+export function createWorkspaceId(name: string, now = Date.now(), nonce = Math.random().toString(36).slice(2, 6)): string {
   const slug = name
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 32)
-  return `ws-${slug || 'folder'}-${now.toString(36)}`
+  return `ws-${slug || 'folder'}-${now.toString(36)}-${nonce}`
 }
