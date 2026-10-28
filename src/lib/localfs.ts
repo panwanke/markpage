@@ -10,7 +10,7 @@
 export const MARKDOWN_EXTENSION = /\.(md|markdown|mdown|mkd|txt)$/i
 
 /** 扫描时直接跳过的目录：几百上千个文件对阅读器没有意义。 */
-const SKIP_DIRECTORIES = new Set(['node_modules', '.git', '.obsidian', '.trash', '.cache', 'dist', 'build', 'coverage', '.next'])
+export const SKIP_DIRECTORIES = new Set(['node_modules', '.git', '.obsidian', '.trash', '.cache', 'dist', 'build', 'coverage', '.next'])
 
 export const MAX_SCAN_DEPTH = 4
 

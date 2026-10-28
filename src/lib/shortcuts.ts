@@ -8,7 +8,7 @@ import type { MessageKey } from '../i18n'
  * 都从 COMMANDS 派生，新增一个命令只需要在这里加一行 + 补两条文案。
  */
 
-export type CommandGroup = 'file' | 'edit' | 'format' | 'revision' | 'view' | 'tabs' | 'help'
+export type CommandGroup = 'file' | 'edit' | 'format' | 'revision' | 'view' | 'vault' | 'tabs' | 'help'
 
 export type CommandId =
   | 'file.new'
@@ -43,6 +43,10 @@ export type CommandId =
   | 'view.sidebar'
   | 'view.comments'
   | 'view.focus'
+  | 'vault.quickSwitch'
+  | 'vault.links'
+  | 'vault.followLink'
+  | 'vault.createNote'
   | 'tabs.prev'
   | 'tabs.next'
   | 'tabs.close'
@@ -96,6 +100,11 @@ export const COMMANDS: readonly CommandDefinition[] = [
   { id: 'view.comments', group: 'view', labelKey: 'cmd.toggleComments', defaultBinding: 'Mod+Shift+M' },
   { id: 'view.focus', group: 'view', labelKey: 'cmd.focusMode', defaultBinding: 'Mod+Shift+F' },
 
+  { id: 'vault.quickSwitch', group: 'vault', labelKey: 'cmd.quickSwitch', defaultBinding: 'Mod+O' },
+  { id: 'vault.followLink', group: 'vault', labelKey: 'cmd.followLink', defaultBinding: 'Mod+Enter' },
+  { id: 'vault.createNote', group: 'vault', labelKey: 'cmd.createNote', defaultBinding: 'Mod+Shift+N' },
+  { id: 'vault.links', group: 'vault', labelKey: 'cmd.links', defaultBinding: 'Mod+Shift+L' },
+
   { id: 'tabs.prev', group: 'tabs', labelKey: 'cmd.prevTab', defaultBinding: 'Mod+Alt+ArrowLeft' },
   { id: 'tabs.next', group: 'tabs', labelKey: 'cmd.nextTab', defaultBinding: 'Mod+Alt+ArrowRight' },
   { id: 'tabs.close', group: 'tabs', labelKey: 'cmd.closeTab', defaultBinding: 'Mod+Alt+W' },
@@ -113,6 +122,7 @@ export const MENU_GROUPS: { id: CommandGroup; labelKey: MessageKey }[] = [
   { id: 'format', labelKey: 'menu.format' },
   { id: 'revision', labelKey: 'menu.revision' },
   { id: 'view', labelKey: 'menu.view' },
+  { id: 'vault', labelKey: 'menu.vault' },
   { id: 'tabs', labelKey: 'menu.tabs' },
   { id: 'help', labelKey: 'menu.help' },
 ]
@@ -311,6 +321,7 @@ export const ALLOWED_WHILE_TYPING = new Set<CommandId>([
   'file.print', 'file.settings', 'revision.toggle', 'help.shortcuts',
   'view.rendered', 'view.split', 'view.source', 'view.paged', 'view.continuous',
   'view.sidebar', 'view.comments', 'view.focus',
+  'vault.quickSwitch', 'vault.links', 'vault.createNote',
   'tabs.prev', 'tabs.next', 'tabs.close',
 ])
 
@@ -326,6 +337,8 @@ export const SOURCE_COMMANDS = new Set<CommandId>([
   'edit.undo', 'edit.redo', 'edit.deleteSelection',
   'format.bold', 'format.strike', 'format.highlight', 'format.code', 'format.clear', 'format.comment',
   'revision.markDelete', 'revision.insert', 'revision.acceptAll', 'revision.rejectAll',
+  // 跟随双链要看光标停在哪，只有编辑器自己知道准确位置。
+  'vault.followLink',
 ])
 
 type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>

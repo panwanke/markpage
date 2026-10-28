@@ -71,6 +71,7 @@ Commands live in `COMMANDS` in `src/lib/shortcuts.ts`: one command = id + group 
 | Format | Bold `+B` · Strikethrough `+Shift+X` · Highlight `+Shift+H` · Inline code `+Shift+C` · Clear formatting `+\` · Comment `+Alt+M` |
 | Revision | Toggle revision `+Shift+R` · Mark deletion `+Alt+D` · Insert / replace `+Alt+I` · Accept all `+Alt+Enter` · Reject all `+Alt+Backspace` |
 | View | Typeset / Split / Source `+Alt+1/2/3` · Paginated / continuous `+Alt+P` `+Alt+C` · Sidebar `+Shift+B` · Comments `+Shift+M` · Focus `+Shift+F` |
+| Vault | Quick switch `+O` · Follow link at cursor `+Enter` · New note in vault `+Shift+N` · Links panel `+Shift+L` |
 | Tabs | Previous / next `+Alt+←` `+Alt+→` · Close current `+Alt+W` |
 
 Rows sharing a prefix omit `Ctrl/⌘` after the first. The defaults deliberately avoid browser-reserved keys (`Ctrl+N`, `Ctrl+T`, `Ctrl+W`, `Ctrl+1..9`): those cannot be intercepted even with `preventDefault()`, so binding them would only look like "the shortcut does not work".
@@ -122,6 +123,39 @@ Chromium also returns a real handle on drop (`getAsFileSystemHandle()`), so a dr
 
 **Obsidian-style live editing** ships as a built-in plugin (`markpage.obsidian-live-editing`), **off by default**; enable it under Settings → Plugins and a fourth editor mode appears next to rendered / split / source. It is one continuous CodeMirror 6 view where non-active lines render headings, bold, italics, strikethrough, links, lists and quotes without their markers, while the line under the cursor shows the raw Markdown so you can edit the markup in place. Frontmatter, raw HTML, code blocks and complex math stay as source on purpose — no lossy round trip. Markdown remains the single source of truth: every keystroke goes through the same `commitEdit` path as the source editor, so revisions, undo history, comments, formatting toolbar and disk writes all behave identically. IME composition is deferred until the candidate is committed, and disabling the plugin falls back to the rendered view without touching the text.
 
+
+## Obsidian vault
+
+Connect a folder that contains `.obsidian/` and MarkPage reads it as a vault: Obsidian's syntax renders, links resolve inside the vault, and edits are written back into the same files Obsidian opens.
+
+Only `.obsidian/app.json` is read (`attachmentFolderPath`, `useMarkdownLinks`, `newLinkFormat`); nothing under `.obsidian/` is ever written, and no plugins are loaded.
+
+| Syntax | Behaviour |
+| :--- | :--- |
+| `[[Note]]`, `[[Note\|alias]]` | Resolved as exact path → relative path → file name (shortest) → alias, then opened in place. Unresolved links are greyed out and listed in the links panel |
+| `[[Note#Heading]]`, `[[Note#^block]]`, `[[#Here]]` | Opens the note and scrolls to the heading (matched by text, not by slug) or to the block id |
+| `![[Note]]`, `![[Note#Heading]]` | The note body is inlined **read-only**: no source offsets, no comment anchors, up to 3 levels deep. A cycle or a missing target shows a labelled placeholder with a jump button |
+| `![[image.png]]` | Asset via blob URL; looked up as absolute path → relative to the note → `attachmentFolderPath` → unique file name in the vault |
+| `[text](Note.md)` | Treated as an in-vault link when it resolves, otherwise a normal external link |
+| `> [!type]`, `> [!type]-`, `> [!type]+` | Callout with per-type colours; `-` / `+` fold it into a `<details>` |
+| `#tag`, `#parent/child` | Styled and clickable — opens the quick switcher pre-filled with that tag |
+| `==highlight==` | `<mark>` |
+| `%%comment%%` | Hidden |
+| frontmatter `tags` / `aliases` | Read for the index, the backlinks panel and the quick switcher |
+
+Three panels and one dialog complete the loop:
+
+- **Vault tree** in the workspace panel (collapsible folders, Obsidian badge, attachment count).
+- **Links panel**: backlinks to the current note with the matching line as context, plus every link in the note that does not resolve yet — each one offers "create note", the only place MarkPage writes a *new* file.
+- **Quick switcher** (`Mod+O`): fuzzy over title / alias / path, `↑` `↓` `Enter` `Esc`, and `#tag` to filter by tag.
+- **Follow link** (`Mod+Enter`) opens the `[[wikilink]]` under the caret; **new note** (`Mod+Shift+N`) creates an untitled note next to the current one (numbered when the name is taken) and opens it.
+- **Conflict dialog**: see write-back below.
+
+**Write-back.** Markdown stays the single source of truth, and MarkPage never rewrites a file wholesale. Page settings touch only the keys it owns (`title` / `header` / `footer` / `paper` / `fontSize` / `lineHeight`), edited line by line: key order, comments, quoting style and CRLF line endings survive, and invalid YAML is left untouched instead of being re-serialised. Before every write the file's mtime and size are compared with what was read; if another program changed it, the write stops and the dialog offers *reload from disk* / *save a copy* / *overwrite*. The previous content is kept in `localStorage` while a write is in flight, so an interrupted write can be recovered on the next load.
+
+Vaults are scanned to 8 levels and 5000 files, indexing reads at most 512 KB per note and caches results in IndexedDB (keyed by mtime + size), so reconnecting a large vault is fast. Indexing runs in a Web Worker and falls back to the main thread wherever Workers are unavailable or blocked. Settings → Obsidian toggles the syntax layer and external-change detection, and can rebuild the index.
+
+Not supported, by design: community plugin syntax (Dataview, Templater, Excalidraw), `.canvas`, the graph view, publish / sync, and renaming or deleting notes from inside MarkPage — renaming breaks every link pointing at the note, so it belongs in Obsidian, which can update them.
 
 ## Revision mode
 

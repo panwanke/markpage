@@ -1,10 +1,31 @@
 import { createElement, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import type { RootContent } from 'hast'
+import type { Element, RootContent } from 'hast'
 import { toString } from 'hast-util-to-string'
 import { useI18n } from '../i18n'
+import type { MessageKey } from '../i18n'
 import { getRootBlocks, parseMarkdown } from '../lib/markdown'
+import type { ResolvedLink, WikilinkTarget } from '../lib/links'
+import { basenameNoExtension } from '../lib/links'
+import { MAX_EMBED_DEPTH } from '../lib/embeds'
 import type { PageConfig, SelectionMenuRequest, SelectionSnapshot } from '../types'
+
+/** 库内跳转需要的全部能力；单文件模式下不传，双链就只显示、不跳转。 */
+export interface DocumentLinkContext {
+  fromPath: string
+  resolveLink: (target: WikilinkTarget) => ResolvedLink | null
+  /** 相对图片 → blob URL；未就绪返回 null（调用方稍后会因 contentVersion 变化重渲染）。 */
+  resolveAsset: (src: string) => string | null
+  /** `![[笔记]]` 的正文；未就绪返回 null 并触发后台读取。 */
+  resolveEmbed?: (target: WikilinkTarget) => { path: string; markdown: string } | null
+  /** `[文字](笔记.md)`：标准 Markdown 链接也允许指到库里。 */
+  resolveMarkdownLink?: (href: string) => (ResolvedLink & { anchor: string }) | null
+  /** 换一个「当前文件」再拿一份上下文：嵌入内容里的相对链接要按被嵌入文件解析。 */
+  forPath?: (path: string) => DocumentLinkContext
+  onOpenLink: (path: string, anchor: string) => void
+  onOpenTag: (tag: string) => void
+  onMissingLink: (target: string) => void
+}
 
 interface MarkdownDocumentProps {
   markdown: string
@@ -13,6 +34,11 @@ interface MarkdownDocumentProps {
   activeCommentId: string | null
   /** 修订模式下正文里的修订标记可以点开「接受 / 拒绝」。 */
   revisionMode: boolean
+  /** Obsidian 语法增强开关；关掉后双链 / callout / 嵌入按普通文字渲染。 */
+  obsidianSyntax?: boolean
+  /** 图片等异步资源就绪后 +1：用来触发重新分页。 */
+  contentVersion?: number
+  linkContext?: DocumentLinkContext
   onSelection: (selection: SelectionSnapshot | null) => void
   onCommentOpen: (id: string) => void
   onRevisionOpen: (offset: number, x: number, y: number) => void
@@ -54,15 +80,118 @@ function parseStyle(style: unknown): CSSProperties | undefined {
 interface RenderContext {
   activeCommentId: string | null
   onCommentOpen: (id: string) => void
+  linkContext?: DocumentLinkContext
+  /** 嵌入内容与宿主用同一套语法规则：关掉增强时嵌入里也不该冒出新解析的双链。 */
+  obsidianSyntax: boolean
+  t: (key: MessageKey, params?: Record<string, string | number>) => string
+  /** 已经渲染过的嵌入路径（不含宿主文档），用于防环。 */
+  embedStack: string[]
+  /** 嵌入内容里的源码偏移属于别的文件，一律不输出，免得选区映射串到宿主文档。 */
+  stripSource: boolean
+}
+
+function wikilinkTargetOf(properties: Record<string, unknown>): WikilinkTarget {
+  return {
+    raw: String(properties.dataWikilinkRaw ?? ''),
+    note: String(properties.dataWikilink ?? ''),
+    anchor: String(properties.dataWikilinkAnchor ?? ''),
+    block: String(properties.dataWikilinkBlock ?? ''),
+    alias: '',
+    embed: properties.dataWikilinkEmbed === '1',
+    asset: false,
+  }
+}
+
+/** 嵌入块的标题：`笔记 › 标题` / `笔记 › ^块id`。 */
+function embedLabel(target: WikilinkTarget, fallback: string) {
+  const base = target.note || fallback
+  const section = target.anchor ? ` › ${target.anchor}` : target.block ? ` › ^${target.block}` : ''
+  return `${base}${section}`
+}
+
+function EmbedPlaceholder({ name, label, note, onOpen }: {
+  name: string
+  label: string
+  note: string
+  onOpen?: () => void
+}) {
+  return (
+    <span className={`embed-block is-${name}`} data-embed-state={name}>
+      <span className="embed-title">
+        <span className="embed-title-text">{label}</span>
+        <span className="embed-state">{note}</span>
+        {onOpen && (
+          <button type="button" className="embed-open" onClick={onOpen} title={label}>
+            ↗
+          </button>
+        )}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * `![[笔记]]` / `![[笔记#标题]]` / `![[笔记#^块id]]`。
+ *
+ * 嵌入内容是**只读**的：不参与选区映射（去掉 data-source-start/end），
+ * 也不渲染评论锚点（那会在同一页里出现重复的 DOM id）。
+ * 相对链接按被嵌入文件解析（`forPath`），因此 B 里写的 `[[C]]` 不会按 A 的目录去猜。
+ */
+function renderEmbed(node: Element, key: string, context: RenderContext): ReactNode {
+  const link = context.linkContext
+  const target = wikilinkTargetOf(node.properties ?? {})
+  const label = embedLabel(target, toString(node))
+  const resolved = link ? link.resolveLink(target) : null
+  const open = resolved && link ? () => link.onOpenLink(resolved.path, target.anchor || (target.block ? `^${target.block}` : '')) : undefined
+
+  if (!resolved) {
+    return <EmbedPlaceholder key={key} name="missing" label={label} note={context.t('embed.missing')} />
+  }
+  if (context.embedStack.includes(resolved.path)) {
+    return <EmbedPlaceholder key={key} name="cycle" label={label} note={context.t('embed.cycle')} onOpen={open} />
+  }
+  if (context.embedStack.length >= MAX_EMBED_DEPTH) {
+    return <EmbedPlaceholder key={key} name="depth" label={label} note={context.t('embed.depth')} onOpen={open} />
+  }
+  const embed = link?.resolveEmbed?.(target) ?? null
+  if (!embed) {
+    // 还没连文件夹，或者正文正在后台读：读完 contentVersion 会变，这里会自动重渲染。
+    return <EmbedPlaceholder key={key} name="loading" label={label} note={context.t('embed.loading')} onOpen={open} />
+  }
+
+  const nested: RenderContext = {
+    ...context,
+    linkContext: link?.forPath ? link.forPath(embed.path) : link,
+    embedStack: [...context.embedStack, embed.path],
+    stripSource: true,
+  }
+  const blocks = getRootBlocks(parseMarkdown(embed.markdown, context.obsidianSyntax)).filter((child) => !isCommentCallout(child))
+  return (
+    <span className="embed-block" data-embed-path={embed.path} key={key}>
+      <span className="embed-title">
+        <span className="embed-title-text">{label}</span>
+        <button type="button" className="embed-open" onClick={open} title={context.t('embed.open')}>
+          ↗
+        </button>
+      </span>
+      <span className="embed-content">
+        {blocks.map((child, index) => renderNode(child, `${key}-e${index}`, nested))}
+      </span>
+    </span>
+  )
 }
 
 function renderNode(node: RootContent, key: string, context: RenderContext): ReactNode {
   if (node.type === 'text') return node.value
   if (node.type !== 'element') return null
   if (BLOCKED_TAGS.has(node.tagName)) return null
+  // 嵌入笔记：整块换掉，不再走下面的链接分支。
+  if (node.tagName === 'a' && node.properties?.dataWikilinkEmbed === '1') return renderEmbed(node, key, context)
 
   const children = node.children.map((child, index) => renderNode(child, `${key}-${index}`, context))
   if (node.tagName === 'comment') {
+    // 嵌入内容里的评论锚点不参与交互：同一页里出现重复 id 会让跳转失灵。
+    if (context.stripSource) return <span key={key}>{children}</span>
     const id = String(node.properties?.id ?? '')
     return (
       <span
@@ -88,6 +217,8 @@ function renderNode(node: RootContent, key: string, context: RenderContext): Rea
     if (name === 'style') properties.style = parseStyle(value)
     else if (name === 'className' || name === 'class') properties.className = Array.isArray(value) ? value.join(' ') : String(value)
     else if (name.startsWith('data')) {
+      // 嵌入内容的偏移来自另一个文件，输出出去只会让选区 / 标注映射到宿主文档的错误位置。
+      if (context.stripSource && (name === 'dataSourceStart' || name === 'dataSourceEnd')) return
       const attribute = name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
       properties[attribute] = value
     } else if (name.startsWith('aria')) {
@@ -101,13 +232,76 @@ function renderNode(node: RootContent, key: string, context: RenderContext): Rea
   })
 
   if (node.tagName === 'a') {
-    properties.href = safeUrl(node.properties?.href)
-    properties.target = '_blank'
-    properties.rel = 'noreferrer'
+    const link = context.linkContext
+    if (node.properties?.dataWikilink !== undefined) {
+      // 双链：库内跳转，不新开标签页；解析不到就只给提示。
+      const target = wikilinkTargetOf(node.properties ?? {})
+      const resolved = link ? link.resolveLink(target) : null
+      const classes = [String(properties.className ?? 'wikilink')]
+      classes.push(resolved ? 'wikilink-resolved' : 'wikilink-unresolved')
+      properties.className = classes.filter(Boolean).join(' ')
+      properties.href = undefined
+      // 同名多篇时 Obsidian 也会静默挑一篇，但用户得知道挑错了；标题栏里写明候选数。
+      const ambiguousNote = resolved?.ambiguous
+        ? context.t('links.ambiguous', { count: resolved.ambiguousCount ?? 0, name: target.note || target.raw })
+        : ''
+      properties.title = [target.raw ? `[[${target.raw}]]` : String(properties.title ?? ''), ambiguousNote]
+        .filter(Boolean)
+        .join(' · ')
+      properties.onClick = (event: React.MouseEvent) => {
+        event.preventDefault()
+        event.stopPropagation()
+        if (!link) return
+        if (resolved) link.onOpenLink(resolved.path, target.anchor || (target.block ? `^${target.block}` : ''))
+        else link.onMissingLink(target.note || target.anchor || target.raw)
+      }
+    } else if (node.properties?.dataTag !== undefined) {
+      const tag = String(node.properties.dataTag)
+      properties.href = undefined
+      properties.onClick = (event: React.MouseEvent) => {
+        event.preventDefault()
+        event.stopPropagation()
+        context.linkContext?.onOpenTag(tag)
+      }
+    } else {
+      // `[文字](笔记.md)` 这类标准链接：能解析到库里就当成内链，否则照旧新开标签页。
+      const href = String(node.properties?.href ?? '')
+      const external = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#')
+      const internal = link && !external ? link.resolveMarkdownLink?.(href) ?? null : null
+      if (internal && link) {
+        properties.href = undefined
+        properties.className = `${String(properties.className ?? '')} internal-link`.trim()
+        if (internal.ambiguous) {
+          properties.title = context.t('links.ambiguous', {
+            count: internal.ambiguousCount ?? 0,
+            name: basenameNoExtension(internal.path),
+          })
+        }
+        properties.onClick = (event: React.MouseEvent) => {
+          event.preventDefault()
+          event.stopPropagation()
+          link.onOpenLink(internal.path, internal.anchor)
+        }
+      } else {
+        properties.href = safeUrl(node.properties?.href)
+        properties.target = '_blank'
+        properties.rel = 'noreferrer'
+      }
+    }
   }
   if (node.tagName === 'img') {
-    properties.src = safeUrl(node.properties?.src, true)
+    const assetName = node.properties?.dataWikilinkAsset
+    const raw = String(node.properties?.src ?? '')
+    const isExternal = /^(https?:|data:|blob:)/i.test(raw)
+    const resolved = assetName
+      ? context.linkContext?.resolveAsset(String(assetName)) ?? null
+      : (!isExternal && context.linkContext ? context.linkContext.resolveAsset(raw) : null)
+    properties.src = resolved ?? (assetName ? undefined : safeUrl(node.properties?.src, true))
     properties.loading = 'lazy'
+    if (!properties.src && (assetName || raw)) {
+      properties.className = `${String(properties.className ?? '')} asset-pending`.trim()
+      properties.alt = String(node.properties?.alt ?? '')
+    }
   }
   if (node.tagName === 'input') {
     properties.disabled = true
@@ -176,6 +370,9 @@ export default function MarkdownDocument({
   viewMode,
   activeCommentId,
   revisionMode,
+  obsidianSyntax = true,
+  contentVersion = 0,
+  linkContext,
   onSelection,
   onCommentOpen,
   onRevisionOpen,
@@ -183,7 +380,7 @@ export default function MarkdownDocument({
   onSelectionMenu,
 }: MarkdownDocumentProps) {
   const { t } = useI18n()
-  const tree = useMemo(() => parseMarkdown(markdown), [markdown])
+  const tree = useMemo(() => parseMarkdown(markdown, obsidianSyntax), [markdown, obsidianSyntax])
   const blocks = useMemo(() => getRootBlocks(tree).filter((node) => !isCommentCallout(node)), [tree])
   const [pages, setPages] = useState<RootContent[][]>([blocks])
   const measureRef = useRef<HTMLDivElement>(null)
@@ -193,7 +390,7 @@ export default function MarkdownDocument({
   const verticalSpace = 156
   const contentWidth = dimensions.width - horizontalPadding * 2
   const contentHeight = dimensions.height - verticalSpace
-  const context = { activeCommentId, onCommentOpen }
+  const context: RenderContext = { activeCommentId, onCommentOpen, linkContext, t, obsidianSyntax, embedStack: [], stripSource: false }
   const articleStyle = {
     '--doc-font-size': `${config.fontSize}px`,
     '--doc-line-height': config.lineHeight,
@@ -240,7 +437,7 @@ export default function MarkdownDocument({
       cancelled = true
       pending.forEach((image) => image.removeEventListener('load', remeasure))
     }
-  }, [blocks, config.paper, config.fontSize, config.lineHeight, contentHeight, viewMode, onPageCount])
+  }, [blocks, config.paper, config.fontSize, config.lineHeight, contentHeight, viewMode, onPageCount, contentVersion])
 
   /** 把 DOM Range 换算成源码偏移，失败返回 null（跨页跨块、命中保护区的选区都会落空）。 */
   function snapshotFromRange(range: Range): SelectionSnapshot | null {

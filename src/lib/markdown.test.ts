@@ -6,6 +6,7 @@ import {
   applyInlineFormat,
   deleteComment,
   findCommentAnchorRange,
+  frontmatterIsInvalid,
   getCommentThreads,
   getPageConfig,
   parseMarkdown,
@@ -242,5 +243,55 @@ describe('评论锚点定位', () => {
   it('锚点不存在或已删除时返回 null', () => {
     const source = '没有评论的正文\n'
     expect(findCommentAnchorRange(source, 'c-missing')).toBeNull()
+  })
+})
+
+describe('Obsidian 语法增强开关', () => {
+  const source = '> [!note] 标题\n\n见 [[另一篇]] 和 #标签\n'
+
+  function classNames(markdown: string, obsidianSyntax?: boolean) {
+    const names: string[] = []
+    visit(parseMarkdown(markdown, obsidianSyntax), 'element', (node) => {
+      const value = node.properties?.className
+      if (Array.isArray(value)) names.push(...value.map(String))
+      if (node.properties?.dataWikilink !== undefined) names.push('wikilink')
+    })
+    return names
+  }
+
+  it('开启时 callout 与双链都生效', () => {
+    const names = classNames(source)
+    expect(names).toContain('callout')
+    expect(names).toContain('wikilink')
+  })
+
+  it('关掉后按普通文字渲染，不留半解析产物', () => {
+    const tree = parseMarkdown(source, false)
+    expect(classNames(source, false)).not.toContain('callout')
+    expect(classNames(source, false)).not.toContain('wikilink')
+    const text = toString(tree)
+    expect(text).toContain('[!note] 标题')
+    expect(text).toContain('[[另一篇]]')
+    expect(text).toContain('#标签')
+  })
+
+  it('两种模式的结果不会互相命中缓存', () => {
+    const enhanced = parseMarkdown('见 [[x]]', true)
+    const plain = parseMarkdown('见 [[x]]', false)
+    expect(plain).not.toBe(enhanced)
+    // 同模式再问一次仍然拿缓存里的同一棵树。
+    expect(parseMarkdown('见 [[x]]', true)).toBe(enhanced)
+    expect(parseMarkdown('见 [[x]]', false)).toBe(plain)
+  })
+})
+
+describe('frontmatter 合法性', () => {
+  it('合法 YAML 与没有 frontmatter 都返回 false', () => {
+    expect(frontmatterIsInvalid('---\ntags: [a, b]\n---\n\n正文')).toBe(false)
+    expect(frontmatterIsInvalid('# 只有正文\n')).toBe(false)
+  })
+
+  it('解析不了的 YAML 返回 true，供界面提示', () => {
+    expect(frontmatterIsInvalid('---\ntags: [a, b\n---\n\n正文')).toBe(true)
   })
 })

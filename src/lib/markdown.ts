@@ -9,10 +9,14 @@ import rehypeKatex from 'rehype-katex'
 import rehypeSlug from 'rehype-slug'
 import { rehypeHighlightLite } from './highlight'
 import { DEFAULT_HIGHLIGHT } from './palette'
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import { parse as parseYaml } from 'yaml'
 import { visit } from 'unist-util-visit'
 import { toString } from 'hast-util-to-string'
 import type { Element, Root, RootContent, Text } from 'hast'
+import { FRONTMATTER, setFrontmatterKeys, splitFrontmatter } from './frontmatter'
+import { rehypeObsidian, rehypeEmbeds } from './obsidian-syntax'
+import { rehypeCallouts } from './callouts'
+import { slicePosition } from './positions'
 import type {
   CommentMessage,
   CommentThread,
@@ -88,25 +92,6 @@ function rehypeSourceMap() {
 // 只在同一个文本节点内配对，因此切出来的每一段都能带上准确的源码偏移。
 const REVISION_DELETE = /~([^\s~](?:[^~\n]*[^\s~])?)~/g
 
-type HastPoint = NonNullable<Text['position']>['start']
-type HastPosition = NonNullable<Text['position']>
-
-function pointAt(base: HastPoint, value: string, index: number): HastPoint {
-  const before = value.slice(0, index)
-  const breaks = (before.match(/\n/g) ?? []).length
-  const lastBreak = before.lastIndexOf('\n')
-  return {
-    line: base.line + breaks,
-    column: breaks === 0 ? base.column + index : index - lastBreak,
-    offset: (base.offset ?? 0) + index,
-  }
-}
-
-function slicePosition(position: HastPosition | undefined, value: string, from: number, to: number): HastPosition | undefined {
-  if (!position?.start) return undefined
-  return { start: pointAt(position.start, value, from), end: pointAt(position.start, value, to) }
-}
-
 /** 代码与公式里的波浪号不是修订标记，原样留着。 */
 function isRevisionOpaque(parent: Element | Root) {
   if (parent.type !== 'element') return false
@@ -165,23 +150,63 @@ function rehypeRevisions() {
   }
 }
 
-const processor = unified()
-  .use(remarkParse)
-  // singleTilde 关掉：单个 `~文字~` 留给修订模式当删除标记，删除线仍然只认 `~~文字~~`。
-  .use(remarkGfm, { singleTilde: false })
-  .use(remarkMath)
-  .use(remarkFrontmatter)
-  .use(remarkRehype, { allowDangerousHtml: true })
-  .use(rehypeRaw)
-  .use(rehypeRevisions)
-  .use(rehypeSourceMap)
-  .use(rehypeSlug)
-  .use(rehypeKatex)
-  .use(rehypeHighlightLite)
+/**
+ * 管线有两条：开了 Obsidian 语法增强的那条多三步（双链 / callout / 嵌入），
+ * 其余完全一样。设置里关掉增强时走 plain，`[[x]]`、`> [!note]` 就当普通文字渲染 ——
+ * 这正是用户关它的意图，而不是一个不起作用的勾选框。
+ */
+function createProcessor(obsidianSyntax: boolean) {
+  const chain = unified()
+    .use(remarkParse)
+    // singleTilde 关掉：单个 `~文字~` 留给修订模式当删除标记，删除线仍然只认 `~~文字~~`。
+    .use(remarkGfm, { singleTilde: false })
+    .use(remarkMath)
+    .use(remarkFrontmatter)
+    .use(remarkRehype, { allowDangerousHtml: true })
+    .use(rehypeRaw)
+  const withObsidian = obsidianSyntax
+    ? chain.use(rehypeObsidian).use(rehypeCallouts).use(rehypeEmbeds)
+    : chain
+  // Obsidian 语法与 callout 必须在 sourceMap 之前：它们切分 / 重排文本节点，
+  // 位置信息由它们带走，sourceMap 最后统一套上 data-source-start/end。
+  return withObsidian
+    .use(rehypeRevisions)
+    .use(rehypeSourceMap)
+    .use(rehypeSlug)
+    .use(rehypeKatex)
+    .use(rehypeHighlightLite)
+}
 
-export function parseMarkdown(markdown: string): Root {
+const processors = { enhanced: createProcessor(true), plain: createProcessor(false) }
+
+/**
+ * 解析结果按 markdown 字符串缓存（LRU，最多 8 篇）。
+ * App 与 MarkdownDocument 各自会解析一次同一份文本，分页重算时还会再来一次，
+ * 缓存把「一次输入两次全量 pipeline」压成一次。树是只读的，两边共用同一份没有副作用。
+ * 键里带开关状态：同一份文本在两种模式下产出的树不同，不能互相命中。
+ */
+const PARSE_CACHE_LIMIT = 8
+const parseCache = new Map<string, Root>()
+
+export function parseMarkdown(markdown: string, obsidianSyntax = true): Root {
+  const key = `${obsidianSyntax ? 'obsidian' : 'plain'}\u0000${markdown}`
+  const cached = parseCache.get(key)
+  if (cached) {
+    // 命中即刷新顺序，让最近用过的留在缓存里。
+    parseCache.delete(key)
+    parseCache.set(key, cached)
+    return cached
+  }
+  const processor = obsidianSyntax ? processors.enhanced : processors.plain
   const mdast = processor.parse(markdown)
-  return processor.runSync(mdast) as Root
+  const tree = processor.runSync(mdast) as Root
+  parseCache.set(key, tree)
+  while (parseCache.size > PARSE_CACHE_LIMIT) {
+    const oldest = parseCache.keys().next().value
+    if (oldest === undefined) break
+    parseCache.delete(oldest)
+  }
+  return tree
 }
 
 export function getOutline(tree: Root): OutlineItem[] {
@@ -202,8 +227,9 @@ export function getOutline(tree: Root): OutlineItem[] {
   return outline
 }
 
+/** 边界规则只有一份（`frontmatter.ts` 的 `FRONTMATTER`），这里不再另写一条。 */
 function frontmatterMatch(markdown: string) {
-  return /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown)
+  return FRONTMATTER.exec(markdown)
 }
 
 export function getPageConfig(markdown: string): PageConfig {
@@ -230,21 +256,30 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
     : fallback
 }
 
+/**
+ * frontmatter 里有解析不了的 YAML 时返回 true。
+ * 这种文件 `setFrontmatterKeys` 会原样返回（宁可这次设置不生效，也不洗掉别人的元数据），
+ * 所以调用方要据此给出提示，否则用户会以为已经存好了。
+ */
+export function frontmatterIsInvalid(markdown: string): boolean {
+  const { block, valid } = splitFrontmatter(markdown)
+  return Boolean(block) && !valid
+}
+
+/**
+ * 页面设置写回 frontmatter：只改这几个键，其余字节（Obsidian 的 tags / aliases /
+ * 注释 / 键序 / 引号风格）原样保留 —— 见 lib/frontmatter.ts 里的说明。
+ */
 export function updatePageConfig(markdown: string, patch: Partial<PageConfig>) {
-  const match = frontmatterMatch(markdown)
-  let data: Record<string, unknown> = {}
-  if (match) {
-    try {
-      data = (parseYaml(match[1]) ?? {}) as Record<string, unknown>
-    } catch {
-      data = {}
-    }
-  }
-  Object.assign(data, patch)
-  // 空标题 = 未命名：不往 Frontmatter 里写 `title: ''`，让读取端回落到占位标题。
-  if (data.title === '') delete data.title
-  const nextFrontmatter = `---\n${stringifyYaml(data).trimEnd()}\n---\n`
-  return match ? nextFrontmatter + markdown.slice(match[0].length) : nextFrontmatter + '\n' + markdown
+  const values: Record<string, string | number | null> = {}
+  // 空标题 = 未命名：删掉这个键，让读取端回落到占位标题。
+  if (patch.title !== undefined) values.title = patch.title === '' ? null : patch.title
+  if (patch.header !== undefined) values.header = patch.header
+  if (patch.footer !== undefined) values.footer = patch.footer
+  if (patch.paper !== undefined) values.paper = patch.paper
+  if (patch.fontSize !== undefined) values.fontSize = patch.fontSize
+  if (patch.lineHeight !== undefined) values.lineHeight = patch.lineHeight
+  return setFrontmatterKeys(markdown, values)
 }
 
 export function getMarkdownStats(markdown: string): DocumentStats {
