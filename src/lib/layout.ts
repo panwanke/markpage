@@ -3,9 +3,17 @@
  * 面板可以在组之间搬动，拖到同一组就变成并排的标签页（Obsidian / VS Code 的做法），
  * 也可以拖到侧栏底部单独成组。整份布局随设置一起持久化。
  */
-export type PanelId = 'examples' | 'workspace' | 'outline'
+export type PanelId = 'examples' | 'workspace' | 'links' | 'outline'
 
-export const PANEL_IDS: PanelId[] = ['examples', 'workspace', 'outline']
+export const PANEL_IDS: PanelId[] = ['examples', 'workspace', 'links', 'outline']
+
+/**
+ * 首次打开时铺出来的面板。
+ *
+ * 链接面板默认不占位：不是每个库都需要盯反向链接，先收起来、要用时由
+ * `vault.links` 命令 `openPanel` 打开，关掉之后也能在「添加面板」里找回来。
+ */
+const DEFAULT_PANELS: PanelId[] = ['examples', 'workspace', 'outline']
 
 export interface PanelGroup {
   id: string
@@ -36,7 +44,7 @@ export function createDefaultLayout(): SidebarLayout {
   return {
     visible: true,
     width: SIDEBAR_DEFAULT_WIDTH,
-    groups: PANEL_IDS.map((panel) => ({ id: `group-${panel}`, panels: [panel], active: panel })),
+    groups: DEFAULT_PANELS.map((panel) => ({ id: `group-${panel}`, panels: [panel], active: panel })),
   }
 }
 

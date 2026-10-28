@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Braces, Check, FileCog, Keyboard, Languages, LayoutPanelLeft, Palette, Puzzle, RotateCcw, Type, UserRound, X } from 'lucide-react'
+import { Braces, Check, FileCog, Keyboard, Languages, LayoutPanelLeft, Library, Palette, Puzzle, RotateCcw, Type, UserRound, X } from 'lucide-react'
 import { useI18n } from '../i18n'
 import type { MessageKey } from '../i18n'
 import { FOCUS_MODE_PLUGIN_ID, OBSIDIAN_LIVE_EDITING_PLUGIN_ID } from '../plugins/ids'
@@ -19,6 +19,12 @@ interface SettingsModalProps {
   keymap: Keymap
   /** 内置插件清单：由宿主从注册表派生，启停状态即注册表真实状态。 */
   plugins: Array<{ id: string; name: string; description: string; version: string; enabled: boolean }>
+  /** Obsidian 语法增强：关掉后双链 / callout / 嵌入按普通 Markdown 渲染。 */
+  obsidianSyntax: boolean
+  /** 切回窗口时比对一次磁盘，被外部改过只挂徽标。 */
+  watchDisk: boolean
+  /** 已翻译好的索引状态文案（由宿主汇总，设置面板不关心索引细节）。 */
+  indexStatus: string
   /** 打开时停在哪个标签页，帮助菜单的「快捷键…」靠它直接落到快捷键面板。 */
   initialTab?: SettingsTab
   onUserName: (name: string) => void
@@ -27,11 +33,13 @@ interface SettingsModalProps {
   onKeymap: (keymap: Keymap) => void
   onConfig: (patch: Partial<PageConfig>) => void
   onTogglePlugin: (id: string, enabled: boolean) => void
+  onVaultSettings: (patch: { obsidianSyntax?: boolean; watchDisk?: boolean }) => void
+  onRebuildIndex: () => void
   onResetLayout: () => void
   onClose: () => void
 }
 
-export type SettingsTab = 'general' | 'appearance' | 'page' | 'shortcuts' | 'language' | 'plugins'
+export type SettingsTab = 'general' | 'appearance' | 'page' | 'shortcuts' | 'language' | 'plugins' | 'vault'
 
 const SCALE_PRESETS: { value: number; labelKey: MessageKey }[] = [
   { value: 1, labelKey: 'settings.scale.compact' },
@@ -61,6 +69,9 @@ export default function SettingsModal({
   docFont,
   keymap,
   plugins,
+  obsidianSyntax,
+  watchDisk,
+  indexStatus,
   initialTab = 'general',
   onUserName,
   onLocale,
@@ -68,6 +79,8 @@ export default function SettingsModal({
   onKeymap,
   onConfig,
   onTogglePlugin,
+  onVaultSettings,
+  onRebuildIndex,
   onResetLayout,
   onClose,
 }: SettingsModalProps) {
@@ -85,6 +98,7 @@ export default function SettingsModal({
           <button className={tab === 'shortcuts' ? 'active' : ''} onClick={() => setTab('shortcuts')}><Keyboard size={17} /> {t('settings.tab.shortcuts')}</button>
           <button className={tab === 'language' ? 'active' : ''} onClick={() => setTab('language')}><Languages size={17} /> {t('settings.tab.language')}</button>
           <button className={tab === 'plugins' ? 'active' : ''} onClick={() => setTab('plugins')}><Puzzle size={17} /> {t('settings.tab.plugins')}</button>
+          <button className={tab === 'vault' ? 'active' : ''} onClick={() => setTab('vault')}><Library size={17} /> {t('settings.tab.vault')}</button>
           <div className="settings-version">MARKPAGE<br />VERSION {APP_VERSION}</div>
         </div>
         <div className="settings-content">
@@ -203,6 +217,38 @@ export default function SettingsModal({
                 <div className="font-preview-side">{PREVIEW_KEYS.slice(1, 4).map((key) => t(key)).join(' · ')}</div>
                 <p className="font-preview-doc">{t('settings.appearance.previewDoc')}</p>
               </div>
+            </div>
+          </>}
+          {tab === 'vault' && <>
+            <div className="settings-title"><h2>{t('settings.vault.title')}</h2><p>{t('settings.vault.hint')}</p></div>
+            <div className="settings-section">
+              <h3><Library size={13} /> {t('settings.vault.syntax')}</h3>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={obsidianSyntax}
+                  onChange={(event) => onVaultSettings({ obsidianSyntax: event.target.checked })}
+                />
+                <span>{t('settings.vault.syntax')}</span>
+                <small>{t('settings.vault.syntaxHint')}</small>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={watchDisk}
+                  onChange={(event) => onVaultSettings({ watchDisk: event.target.checked })}
+                />
+                <span>{t('settings.vault.watch')}</span>
+                <small>{t('settings.vault.watchHint')}</small>
+              </label>
+            </div>
+            <div className="settings-section">
+              <h3>{t('settings.vault.status')}</h3>
+              <div className="storage-card">
+                <span className="storage-icon"><Library size={20} /></span>
+                <div><strong>{indexStatus}</strong><p>{t('vault.rebuildHint')}</p></div>
+              </div>
+              <button className="reset-appearance" onClick={onRebuildIndex}><RotateCcw size={13} /> {t('settings.vault.rebuild')}</button>
             </div>
           </>}
           {tab === 'plugins' && <>

@@ -83,21 +83,52 @@ import {
   SPLIT_RATIO_MIN,
   DEFAULT_SPLIT_RATIO,
 } from './lib/storage'
-import { createDefaultLayout, toggleSidebar } from './lib/layout'
+import { createDefaultLayout, openPanel, toggleSidebar } from './lib/layout'
 import {
+  createLocalFile,
   ensureFileWritePermission,
   handlesFromTransfer,
   isSameEntry,
   loadHandle,
   readLocalFileWithInfo,
+  sanitizeFileName,
   titleFromPath,
 } from './lib/localfs'
+import { MARKDOWN_EXTENSION } from './lib/localfs'
+import type { LocalFileEntry } from './lib/localfs'
 import { MARKDOWN_EXTENSION as OPENABLE_EXTENSION } from './lib/localfs'
 import { hashContent } from './lib/hash'
 import { useWorkspace } from './hooks/useWorkspace'
 import { useBuiltinPlugins } from './hooks/useBuiltinPlugins'
 import WorkspaceDialog from './components/WorkspaceDialog'
 import ConflictDialog from './components/ConflictDialog'
+import QuickSwitcher from './components/QuickSwitcher'
+import LinksPanel from './components/panels/LinksPanel'
+import type { DocumentLinkContext } from './components/MarkdownDocument'
+import { createAssetResolver, type AssetResolver } from './lib/assets'
+import { createEmbedCache, type EmbedCache } from './lib/embeds'
+import {
+  buildVaultIndex,
+  buildVaultTree,
+  clearVaultCache,
+  detectVault,
+  unresolvedLinks,
+  vaultFingerprint,
+  vaultNoteSummaries,
+  type VaultConfig,
+  type VaultNode,
+} from './lib/vault'
+import {
+  basenameNoExtension,
+  dirnameOf,
+  resolveMarkdownLink as resolveMarkdownHref,
+  resolveWikilink,
+  uniqueVaultPath,
+  wikilinkAt,
+  type LinkIndex,
+  type WikilinkTarget,
+} from './lib/links'
+import { startWorkerIndex, type WorkerIndexJob } from './lib/worker-index'
 import type { PluginEditorHandle } from './plugins/types'
 import { useI18n } from './i18n'
 import {
@@ -111,6 +142,7 @@ import {
   isTextEntryTarget,
 } from './lib/shortcuts'
 import type { CommandId } from './lib/shortcuts'
+import { setFrontmatterKeys } from './lib/frontmatter'
 import { createHistory, pushHistory, redoHistory, undoHistory } from './lib/history'
 import type { DocumentHistory } from './lib/history'
 import { moveTab, reorderOpenDocuments, shiftTab } from './lib/tabs'
@@ -319,6 +351,316 @@ export default function App() {
       if (document.binding) enqueueWrite(document)
     })
   }, [writeArmKey, enqueueWrite])
+
+  // ---------- Obsidian 库：识别、目录树、链接索引、附件与嵌入 ----------
+  // 会话（目录句柄 + 文件列表 + 附件句柄）由 useWorkspace 持有；这里只做「读得懂」那层，
+  // 写盘一律走 workspace，不在这里另开第二条路。
+  const vaultSession = workspace.session
+  const [vaultConfig, setVaultConfig] = useState<VaultConfig | null>(null)
+  const [vaultTree, setVaultTree] = useState<VaultNode[]>([])
+  const [vaultIndex, setVaultIndex] = useState<LinkIndex | null>(null)
+  const [indexProgress, setIndexProgress] = useState<{ done: number; total: number } | null>(null)
+  /** 图片 / 嵌入就绪后 +1：正文据此重新渲染并重新分页。 */
+  const [assetVersion, setAssetVersion] = useState(0)
+  /** null = 关闭；字符串 = 打开并预填查询（点标签、`[[` 补全都走这里）。 */
+  const [quickSwitch, setQuickSwitch] = useState<string | null>(null)
+  /** 磁盘上被外部改过、还没重新载入的路径。只提示，不自动重载。 */
+  const [diskChanged, setDiskChanged] = useState<string[]>([])
+  const [pendingAnchor, setPendingAnchor] = useState<{ path: string; anchor: string } | null>(null)
+
+  const [assetResolver, setAssetResolver] = useState<AssetResolver | null>(null)
+  const [embedCache, setEmbedCache] = useState<EmbedCache | null>(null)
+  const vaultIndexRef = useRef<LinkIndex | null>(null)
+  const indexAbortRef = useRef<AbortController | null>(null)
+  const workerJobRef = useRef<WorkerIndexJob | null>(null)
+
+  /**
+   * 建索引：可取消，进度上报状态栏与链接面板。
+   * 优先丢进 Worker（几千篇的库不卡正文），Worker 起不来或中途出错就退回主线程。
+   */
+  const rebuildIndex = useCallback(async (entries: LocalFileEntry[], name: string, options: { force?: boolean } = {}) => {
+    indexAbortRef.current?.abort()
+    workerJobRef.current?.cancel()
+    const controller = new AbortController()
+    indexAbortRef.current = controller
+    // 缓存键带库标识：换库后同路径同 mtime/size 绝不能命中上一个库的索引。
+    const vault = vaultFingerprint(name, entries)
+    setIndexProgress({ done: 0, total: entries.length })
+    const onProgress = (done: number, total: number) => {
+      if (!controller.signal.aborted) setIndexProgress({ done, total })
+    }
+    try {
+      if (options.force) await clearVaultCache(vault)
+      let index: LinkIndex
+      const job = startWorkerIndex(entries, { useCache: !options.force, vault, onProgress })
+      if (job) {
+        workerJobRef.current = job
+        try {
+          index = await job.promise
+        } catch {
+          // Worker 不可用（句柄不可克隆 / 被 CSP 拦掉）：主线程重跑一遍，结果一样只是慢些。
+          if (controller.signal.aborted) return
+          index = await buildVaultIndex(entries, { signal: controller.signal, useCache: !options.force, vault, onProgress })
+        } finally {
+          workerJobRef.current = null
+        }
+      } else {
+        index = await buildVaultIndex(entries, { signal: controller.signal, useCache: !options.force, vault, onProgress })
+      }
+      if (controller.signal.aborted) return
+      vaultIndexRef.current = index
+      setVaultIndex(index)
+    } catch {
+      // 建索引失败不影响阅读：双链退化成「未解析」，写回与标注完全不受影响。
+    } finally {
+      if (!controller.signal.aborted) setIndexProgress(null)
+    }
+  }, [])
+
+  // 会话一换（开关文件夹 / 刷新 / 切根）：库配置与目录树重建，索引重新排队。
+  useEffect(() => {
+    vaultIndexRef.current = null
+    setVaultIndex(null)
+    setIndexProgress(null)
+    if (!vaultSession || vaultSession.invalid) {
+      setVaultConfig(null)
+      setVaultTree([])
+      return
+    }
+    setVaultTree(buildVaultTree(vaultSession.files))
+    let cancelled = false
+    void detectVault(vaultSession.handle)
+      .then((config) => { if (!cancelled) setVaultConfig(config) })
+      .catch(() => { if (!cancelled) setVaultConfig(null) })
+    return () => { cancelled = true }
+  }, [vaultSession])
+
+  // 索引：扫描完（不是在扫）且确实有文件时才建，避免拿半份列表算出错的链接关系。
+  useEffect(() => {
+    if (!vaultSession || vaultSession.scanning || !vaultSession.files.length) return
+    void rebuildIndex(vaultSession.files, vaultSession.name)
+    return () => {
+      indexAbortRef.current?.abort()
+      workerJobRef.current?.cancel()
+    }
+  }, [vaultSession, rebuildIndex])
+
+  // 附件解析器与嵌入缓存都绑在会话上：换库即 dispose，旧的 blob URL 不能跨库复用。
+  useEffect(() => {
+    if (!vaultSession || !vaultConfig) {
+      setAssetResolver(null)
+      setEmbedCache(null)
+      return
+    }
+    const resolver = createAssetResolver({
+      lookup: (path) => vaultSession.assets.get(path),
+      listAssets: () => Array.from(vaultSession.assets.keys()),
+      attachmentFolder: () => vaultConfig.attachmentFolder,
+      onChange: () => setAssetVersion((value) => value + 1),
+    })
+    const embeds = createEmbedCache({
+      read: async (path) => {
+        const entry = vaultSession.files.find((file) => file.path === path)
+        if (!entry) return null
+        return (await readLocalFileWithInfo(entry.handle)).content
+      },
+      onReady: () => setAssetVersion((value) => value + 1),
+    })
+    setAssetResolver(resolver)
+    setEmbedCache(embeds)
+    return () => {
+      resolver.dispose()
+      embeds.dispose()
+      setAssetResolver(null)
+      setEmbedCache(null)
+    }
+  }, [vaultSession, vaultConfig])
+
+  useEffect(() => () => {
+    // 卸载时收摊：索引作业不该比界面活得久。
+    indexAbortRef.current?.abort()
+    workerJobRef.current?.cancel()
+  }, [])
+
+  /** 当前文档在库里的路径；拖进来的单文件没有库内路径。 */
+  const activeVaultPath = activeDocument?.binding?.kind === 'workspace' ? activeDocument.binding.path : ''
+
+  /** 打开库内文件；带锚点时等正文渲染完再滚过去并闪一下。 */
+  async function openVaultPath(path: string, anchor = '') {
+    const workspaceId = workspace.session?.id
+    if (!workspaceId) return
+    await openWorkspaceFile(workspaceId, path)
+    setPendingAnchor(anchor ? { path, anchor } : null)
+  }
+
+  useEffect(() => {
+    if (!pendingAnchor) return
+    const timer = window.setTimeout(() => {
+      const target = document.querySelector(`.markdown-body #${CSS.escape(pendingAnchor.anchor)}`)
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      target?.classList.add('anchor-flash')
+      window.setTimeout(() => target?.classList.remove('anchor-flash'), 1400)
+      setPendingAnchor(null)
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [pendingAnchor, activeDocument?.id])
+
+  /**
+   * 正文里的双链 / 标签 / 相对图片 / 嵌入都走这一份上下文。
+   * 没连文件夹时是 undefined：此时双链只显示、不跳转。
+   */
+  const linkContext = useMemo<DocumentLinkContext | undefined>(() => {
+    if (!assetResolver || !embedCache || !vaultSession) return undefined
+    const build = (fromPath: string): DocumentLinkContext => {
+      const context: DocumentLinkContext = {
+        fromPath,
+        resolveLink: (target: WikilinkTarget) => {
+          const index = vaultIndexRef.current
+          return index ? resolveWikilink(target, fromPath, index) : null
+        },
+        resolveAsset: (src: string) => assetResolver.resolve(src, fromPath),
+        resolveMarkdownLink: (href: string) => {
+          const index = vaultIndexRef.current
+          return index ? resolveMarkdownHref(href, fromPath, index) : null
+        },
+        resolveEmbed: (target: WikilinkTarget) => {
+          const index = vaultIndexRef.current
+          if (!index) return null
+          const resolved = resolveWikilink(target, fromPath, index)
+          if (!resolved) return null
+          return embedCache.resolve(resolved.path, target.anchor, target.block)
+        },
+        forPath: (path: string) => (path === fromPath ? context : build(path)),
+        onOpenLink: (path: string, anchor: string) => { void openVaultPath(path, anchor) },
+        onOpenTag: (tag: string) => setQuickSwitch(`#${tag}`),
+        onMissingLink: (target: string) => notify(t('links.unresolved', { name: target })),
+      }
+      return context
+    }
+    return build(activeVaultPath)
+    // openVaultPath 每次渲染都是新函数，但它只读 ref 与 setState；放进依赖只会让 memo 白失效。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetResolver, embedCache, vaultSession, activeVaultPath, notify, t])
+
+  const vaultNotes = useMemo(
+    () => (vaultSession ? vaultNoteSummaries(vaultSession.files, vaultIndex) : []),
+    [vaultSession, vaultIndex],
+  )
+
+  const backlinks = useMemo(() => {
+    if (!vaultIndex || !activeVaultPath) return []
+    return (vaultIndex.backlinks.get(activeVaultPath) ?? []).map((reference) => ({
+      from: reference.from,
+      title: titleFromPath(reference.from),
+      snippet: reference.snippet,
+    }))
+  }, [vaultIndex, activeVaultPath])
+
+  const unresolved = useMemo(() => {
+    if (!vaultIndex || !activeVaultPath) return []
+    return Array.from(new Set(unresolvedLinks(vaultIndex, activeVaultPath).map((reference) => reference.target)))
+  }, [vaultIndex, activeVaultPath])
+
+  /** 工作区面板要的库视图：没有会话就是 undefined，面板退回扁平列表。 */
+  const workspaceVault = vaultSession
+    ? {
+      tree: vaultTree,
+      // 没有 .obsidian/app.json 也算「没认出来」：两条路径都该给出提示。
+      inferred: !vaultConfig || vaultConfig.inferred,
+      assetCount: vaultSession.assets.size,
+    }
+    : undefined
+
+  /**
+   * 新建一篇笔记：落在当前笔记所在目录，同名就往后编号。
+   * 「新建笔记」命令要真的新建 —— 同名直接打开已有那篇会让人以为命令没生效。
+   */
+  async function createVaultNote(name: string, options: { unique?: boolean } = {}) {
+    const session = vaultSession
+    if (!session) {
+      notify(t('vault.noFolderHint'))
+      return
+    }
+    const dir = activeVaultPath ? dirnameOf(activeVaultPath) : ''
+    // 未解析链接给过来的名字可能已经带扩展名（`[[新笔记.md]]`），别叠成 `.md.md`。
+    const cleaned = sanitizeFileName(name)
+    const fileName = MARKDOWN_EXTENSION.test(cleaned) ? cleaned : `${cleaned}.md`
+    const base = dir ? `${dir}/${fileName}` : fileName
+    const path = options.unique ? uniqueVaultPath(base, session.files.map((file) => file.path)) : base
+    if (session.files.some((file) => file.path === path)) {
+      await openVaultPath(path)
+      return
+    }
+    try {
+      const created = await createLocalFile(session.handle, path, setFrontmatterKeys('', { title: name }))
+      await workspace.refresh()
+      await openVaultPath(created.path)
+      notify(t('vault.created', { name }))
+    } catch {
+      notify(t('localfs.writeFailed', { name: path }))
+    }
+  }
+
+  /** 光标的 `[[双链]]` 上按 Mod+Enter：能解析就跳，找不到就把名字说出来。 */
+  function followLinkAt(offset: number) {
+    if (offset < 0) {
+      notify(t('vault.followHint'))
+      return
+    }
+    const link = wikilinkAt(markdown, offset)
+    if (!link?.note) {
+      notify(t('vault.followHint'))
+      return
+    }
+    const index = vaultIndexRef.current
+    const resolved = index && activeVaultPath ? resolveWikilink(link, activeVaultPath, index) : null
+    const fallback = vaultSession?.files.find(
+      (file) => basenameNoExtension(file.path).toLowerCase() === link.note!.toLowerCase(),
+    )
+    const path = resolved?.path ?? fallback?.path
+    if (!path) {
+      notify(t('links.unresolved', { name: link.note }))
+      return
+    }
+    void openVaultPath(path, link.anchor)
+  }
+
+  /** 重建索引（设置里的按钮）：强制丢掉缓存，嵌入正文也一并重读。 */
+  async function rebuildVaultIndex() {
+    if (!vaultSession) return
+    embedCache?.invalidate()
+    await rebuildIndex(vaultSession.files, vaultSession.name, { force: true })
+    notify(t('settings.vault.rebuilt'))
+  }
+
+  // 切回窗口时比对一次磁盘：只挂提示，不自动重载 —— 正在标注的人不该丢选区。
+  const readBoundRef = useRef(workspace.readBoundFile)
+  useEffect(() => { readBoundRef.current = workspace.readBoundFile }, [workspace.readBoundFile])
+
+  useEffect(() => {
+    if (!settings.watchDisk) {
+      setDiskChanged([])
+      return
+    }
+    let cancelled = false
+    const check = async () => {
+      const bound = documentsRef.current.filter((document) => document.open && document.binding && document.diskBaseline)
+      const changed: string[] = []
+      for (const document of bound) {
+        const file = await readBoundRef.current(document)
+        if (!file) continue
+        if (hashContent(file.content) !== document.diskBaseline?.hash) changed.push(document.binding?.path ?? document.id)
+      }
+      if (!cancelled) setDiskChanged(changed)
+    }
+    const onFocus = () => { void check() }
+    window.addEventListener('focus', onFocus)
+    void check()
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [settings.watchDisk])
 
   const activeDiskState = activeDocument ? workspace.diskStates.get(activeDocument.id) : undefined
   const activeConflict = activeDocument ? workspace.conflicts.get(activeDocument.id) : undefined
@@ -1200,6 +1542,19 @@ export default function App() {
       case 'view.sidebar': updateSettings({ layout: toggleSidebar(layout) }); break
       case 'view.comments': updateSettings({ showComments: !settings.showComments }); break
       case 'view.focus': setFocusMode((value) => !value); break
+      case 'vault.quickSwitch':
+        if (!vaultSession) { notify(t('vault.noFolderHint')); break }
+        setQuickSwitch('')
+        break
+      case 'vault.followLink':
+        if (!vaultSession) { notify(t('vault.noFolderHint')); break }
+        followLinkAt(target?.start ?? -1)
+        break
+      case 'vault.createNote':
+        if (!vaultSession) { notify(t('vault.noFolderHint')); break }
+        void createVaultNote(t('document.untitled'), { unique: true })
+        break
+      case 'vault.links': updateSettings({ layout: openPanel(layout, 'links') }); break
       case 'tabs.prev': cycleTab(-1); break
       case 'tabs.next': cycleTab(1); break
       case 'tabs.close': if (activeDocument) closeDocument(activeDocument.id); break
@@ -1283,6 +1638,7 @@ export default function App() {
               scanning: workspace.session.scanning,
               invalid: workspace.session.invalid,
               files: workspace.session.files.map((file) => ({ path: file.path, title: file.title })),
+              vault: workspaceVault,
             }
             : null}
           diskStates={workspace.diskStates}
@@ -1306,6 +1662,21 @@ export default function App() {
           onUnbind={unbindDocument}
           onReload={reloadDocument}
           onCopyPath={copyDocumentPath}
+        />
+      ),
+    },
+    {
+      id: 'links',
+      title: t('sidebar.links'),
+      badge: backlinks.length + unresolved.length,
+      content: (
+        <LinksPanel
+          inVault={Boolean(activeVaultPath)}
+          progress={indexProgress}
+          backlinks={backlinks}
+          unresolved={unresolved}
+          onOpen={(path) => { void openVaultPath(path) }}
+          onCreate={(name) => { void createVaultNote(name) }}
         />
       ),
     },
@@ -1447,6 +1818,9 @@ export default function App() {
                   markdown={markdown}
                   config={config}
                   viewMode={mode === 'split' ? 'continuous' : settings.viewMode}
+                  obsidianSyntax={settings.obsidianSyntax}
+                  linkContext={linkContext}
+                  contentVersion={assetVersion}
                   activeCommentId={activeCommentId}
                   revisionMode={settings.revisionMode}
                   onSelection={(next) => {
@@ -1528,6 +1902,15 @@ export default function App() {
               <span className="status-save-dot" />
               <span>{saveState === 'saved' ? t('status.saved') : t('status.syncing')}</span>
               <span className="status-divider">/</span>
+              {activeDocument && activeVaultPath && diskChanged.includes(activeVaultPath) && (
+                <button
+                  className="disk-changed-chip"
+                  title={t('localfs.diskChanged')}
+                  onClick={() => void reloadDocument(activeDocument.id)}
+                >
+                  {t('localfs.diskChanged')}
+                </button>
+              )}
               <span>{t('status.words', { count: stats.words })}</span>
               <span>{t('status.reading', { count: stats.readingMinutes })}</span>
               {revisions.total > 0 && (
@@ -1547,7 +1930,12 @@ export default function App() {
                 <button disabled={activePage >= pageCount} onClick={() => goToPage(activePage + 1)}><ChevronRight size={14} /></button>
               </div>
             )}
-            <div><span>{t('status.chars', { count: stats.characters })}</span><span className="status-divider">/</span><span>{t('status.markdown')}</span></div>
+            <div>
+              {indexProgress && <span className="status-index">{t('vault.indexing', indexProgress)}</span>}
+              <span>{t('status.chars', { count: stats.characters })}</span>
+              <span className="status-divider">/</span>
+              <span>{t('status.markdown')}</span>
+            </div>
           </footer>
         </main>
 
@@ -1644,6 +2032,15 @@ export default function App() {
         onLocale={(locale) => updateSettings({ locale })}
         onAppearance={(patch) => updateSettings(patch)}
         onKeymap={(next) => updateSettings({ keymap: next })}
+        obsidianSyntax={settings.obsidianSyntax}
+        watchDisk={settings.watchDisk}
+        indexStatus={indexProgress
+          ? t('vault.indexing', indexProgress)
+          : vaultIndex
+            ? t('vault.indexReady')
+            : t('vault.indexIdle')}
+        onVaultSettings={(patch) => updateSettings(patch)}
+        onRebuildIndex={() => { void rebuildVaultIndex() }}
         onTogglePlugin={(id, enabled) => updateSettings({
           enabledPluginIds: enabled
             ? [...settings.enabledPluginIds.filter((item) => item !== id), id]
@@ -1687,6 +2084,14 @@ export default function App() {
             <span>{t('drop.hint')}</span>
           </div>
         </div>
+      )}
+      {quickSwitch !== null && (
+        <QuickSwitcher
+          notes={vaultNotes}
+          initialQuery={quickSwitch}
+          onSelect={(path) => { setQuickSwitch(null); void openVaultPath(path) }}
+          onClose={() => setQuickSwitch(null)}
+        />
       )}
       {toast && <div className="toast"><Check size={15} />{toast}</div>}
     </div>
