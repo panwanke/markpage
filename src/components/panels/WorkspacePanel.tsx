@@ -5,6 +5,8 @@ import type { DocumentMenuActions } from '../DocumentMenu'
 import { isContextMenuKey } from '../../lib/keys'
 import { DISK_STATE_LABELS } from '../../lib/disk'
 import { useI18n } from '../../i18n'
+import VaultTree from './VaultTree'
+import type { VaultNode } from '../../lib/vault'
 import type { DiskState, MarkdownDocument } from '../../types'
 
 export interface WorkspaceView {
@@ -16,6 +18,8 @@ export interface WorkspaceView {
   /** 目录已不可访问（被移动 / 删除 / 权限撤销）。 */
   invalid?: boolean
   files: { path: string; title: string }[]
+  /** 识别成 Obsidian 库时给目录树；普通文件夹没有这一项，列表退回扁平。 */
+  vault?: { tree: VaultNode[]; inferred: boolean; assetCount: number }
 }
 
 interface WorkspacePanelProps {
@@ -124,6 +128,7 @@ export default function WorkspacePanel({
           <div className="local-folder-head">
             <FolderOpen size={13} />
             <strong title={workspace.name}>{workspace.name}</strong>
+            {workspace.vault && !workspace.vault.inferred && <span className="local-folder-vault">Obsidian</span>}
             <span className={`local-folder-badge ${workspace.writable ? 'is-writable' : ''}`}>
               {workspace.writable ? t('localfs.writable') : t('localfs.readonly')}
             </span>
@@ -137,7 +142,9 @@ export default function WorkspacePanel({
             </button>
           )}
           {workspace.scanning && <p className="local-file-empty">{t('localfs.scanning')}</p>}
-          {workspace.files.length ? (
+          {workspace.vault?.tree.length ? (
+            <VaultTree nodes={workspace.vault.tree} activePath={activePath} onOpen={onOpenWorkspaceFile} />
+          ) : workspace.files.length ? (
             <div className="local-file-list">
               {workspace.files.map((file) => (
                 <button
@@ -153,6 +160,12 @@ export default function WorkspacePanel({
             </div>
           ) : (
             !workspace.scanning && !workspace.invalid && <p className="local-file-empty">{t('localfs.empty')}</p>
+          )}
+          {workspace.vault?.inferred && (
+            <p className="local-file-empty">{t('vault.notDetected')}</p>
+          )}
+          {workspace.vault && workspace.vault.assetCount > 0 && (
+            <p className="local-file-empty">{t('vault.attachments', { count: workspace.vault.assetCount })}</p>
           )}
           {workspace.truncated && !workspace.scanning && (
             <p className="local-file-empty">{t('localfs.truncated', { count: workspace.files.length })}</p>

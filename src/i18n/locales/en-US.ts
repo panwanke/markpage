@@ -483,6 +483,7 @@ export const enUS: Messages = {
   'vault.attachments': '{count} attachments',
   'vault.rebuildHint': 'Drop the cache and reread every note; the files themselves are untouched',
   'vault.followHint': 'Put the cursor inside a [[wikilink]] first',
+  'vault.created': 'Created “{name}”',
   'vault.noFolderHint': 'Connect a folder before using vault commands',
 
   'links.panelTitle': 'Links',

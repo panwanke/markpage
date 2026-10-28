@@ -476,6 +476,7 @@ export const zhCN = {
   'vault.rebuildHint': '删除缓存后重新读取全部笔记，只影响索引，不改动文件',
   'vault.followHint': '把光标放进一个 [[双链]] 里再试',
   'vault.noFolderHint': '先连接一个文件夹，才能用库内命令',
+  'vault.created': '已新建「{name}」',
 
   'links.panelTitle': '链接',
   'links.backlinks': '反向链接',
