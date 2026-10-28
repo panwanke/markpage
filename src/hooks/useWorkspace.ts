@@ -46,6 +46,8 @@ export interface WorkspaceSession {
   name: string
   handle: FileSystemDirectoryHandle
   files: LocalFileEntry[]
+  /** 库内附件句柄（图片 / PDF / 音视频）：正文按相对路径取图要用。 */
+  assets: Map<string, FileSystemFileHandle>
   truncated: boolean
   scanning: boolean
   readPermission: PermissionStatus
@@ -337,6 +339,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       name: input.name,
       handle: input.handle,
       files: [],
+      assets: new Map(),
       truncated: false,
       scanning: readPermission === 'granted',
       readPermission,
@@ -346,9 +349,9 @@ export function useWorkspace(options: UseWorkspaceOptions) {
     applySession(base)
     if (readPermission !== 'granted') return base
     try {
-      const { entries, truncated } = await scanDirectory(input.handle)
+      const { entries, truncated, assets } = await scanDirectory(input.handle)
       if (token !== scanTokenRef.current) return null
-      const next: WorkspaceSession = { ...base, files: entries, truncated, scanning: false }
+      const next: WorkspaceSession = { ...base, files: entries, assets, truncated, scanning: false }
       applySession(next)
       return next
     } catch {

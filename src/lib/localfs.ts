@@ -6,8 +6,14 @@
  * 只有 Chromium 内核（Chrome / Edge）支持，Safari 与 Firefox 走降级提示。
  */
 
+import { ASSET_EXTENSION } from './links'
+
 /** 只收 Markdown 与纯文本，其余文件不进列表。 */
 export const MARKDOWN_EXTENSION = /\.(md|markdown|mdown|mkd|txt)$/i
+
+// 附件的扩展名定义只有一份（`links.ts`），扫描时顺手把它们也收进来 ——
+// 正文里的图片 / PDF 要按相对路径解析，光有 Markdown 列表是画不出来的。
+// 依赖方向是 localfs → links，links 不回头引用这里，不会成环。
 
 /** 扫描时直接跳过的目录：几百上千个文件对阅读器没有意义。 */
 export const SKIP_DIRECTORIES = new Set(['node_modules', '.git', '.obsidian', '.trash', '.cache', 'dist', 'build', 'coverage', '.next'])
@@ -24,6 +30,8 @@ export interface ScanResult {
   entries: LocalFileEntry[]
   /** 命中 MAX_SCAN_FILES 被截断：列表不完整，界面必须提示。 */
   truncated: boolean
+  /** 库内附件（图片 / PDF / 音视频）的句柄表，供正文按相对路径取用。 */
+  assets: Map<string, FileSystemFileHandle>
 }
 
 export interface LocalFileEntry {
@@ -128,6 +136,7 @@ export async function scanDirectory(
   limit = MAX_SCAN_FILES,
 ): Promise<ScanResult> {
   const entries: LocalFileEntry[] = []
+  const assets = new Map<string, FileSystemFileHandle>()
   // 布尔值放在闭包外，遍历一旦触顶就能让所有层级同时收手。
   let truncated = false
 
@@ -139,8 +148,11 @@ export async function scanDirectory(
       }
       if (child.kind === 'file') {
         const path = joinPath(prefix, child.name)
-        if (!isMarkdownPath(path)) continue
-        entries.push({ path, title: titleFromPath(path), handle: child as FileSystemFileHandle })
+        if (isMarkdownPath(path)) {
+          entries.push({ path, title: titleFromPath(path), handle: child as FileSystemFileHandle })
+        } else if (ASSET_EXTENSION.test(path)) {
+          assets.set(path, child as FileSystemFileHandle)
+        }
         continue
       }
       if (depth >= MAX_SCAN_DEPTH) continue
@@ -150,7 +162,7 @@ export async function scanDirectory(
   }
 
   await walk(root, '', 1)
-  return { entries: entries.sort((a, b) => comparePaths(a.path, b.path)), truncated }
+  return { entries: entries.sort((a, b) => comparePaths(a.path, b.path)), truncated, assets }
 }
 
 /** 读内容 + 文件自身的 lastModified：写盘前拿它和基准比较，判断外部有没有改过。 */
