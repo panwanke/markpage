@@ -157,5 +157,9 @@ export interface WorkspaceSettings {
   keymap: Keymap
   /** 启用的内置插件 id；缺省时按 DEFAULT_ENABLED_PLUGINS 补齐。 */
   enabledPluginIds: string[]
+  /** Obsidian 语法增强：双链 / callout / #标签 / ==高亮== / %%注释%%。关掉按普通 Markdown 渲染。 */
+  obsidianSyntax: boolean
+  /** 切回窗口时比对一次磁盘，被外部改过只挂徽标、不自动重载。 */
+  watchDisk: boolean
   exportConfig: ExportConfig
 }

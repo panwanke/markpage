@@ -38,6 +38,8 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   docFont: 'serif',
   keymap: { ...DEFAULT_KEYMAP },
   enabledPluginIds: [...DEFAULT_ENABLED_PLUGIN_IDS],
+  obsidianSyntax: true,
+  watchDisk: true,
   exportConfig: CUSTOM_EXPORT_DEFAULT,
 }
 
@@ -162,6 +164,9 @@ export function loadSettings(): WorkspaceSettings {
       revisionMode: merged.revisionMode === true,
       editorMode: normalizeEditorMode(merged.editorMode),
       enabledPluginIds: normalizeEnabledPlugins(raw.enabledPluginIds),
+      // 新增字段默认开启：老版本设置里没有它们，缺省不能变成「悄悄关掉」。
+      obsidianSyntax: merged.obsidianSyntax !== false,
+      watchDisk: merged.watchDisk !== false,
     }
   } catch {
     return DEFAULT_SETTINGS
