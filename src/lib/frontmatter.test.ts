@@ -5,7 +5,7 @@ import {
   removeFrontmatterKeys,
   setFrontmatterKeys,
   splitFrontmatter,
-} from './frontmatter'
+} from '@markpage/core/frontmatter'
 
 const RICH = [
   '---',
@@ -86,6 +86,12 @@ describe('setFrontmatterKeys', () => {
     const next = setFrontmatterKeys('正文', { title: '新文档' })
     expect(next).toBe('---\ntitle: 新文档\n---\n\n正文')
     expect(readFrontmatter(next).title).toBe('新文档')
+  })
+
+  it('CRLF 文档新建 frontmatter 时也用 CRLF，不混进 LF', () => {
+    const next = setFrontmatterKeys('正文\r\n第二行', { title: '新文档' })
+    expect(next).toBe('---\r\ntitle: 新文档\r\n---\r\n\r\n正文\r\n第二行')
+    expect(next).not.toMatch(/[^\r]\n/)
   })
 
   it('空字符串写成空值（不删除键）', () => {

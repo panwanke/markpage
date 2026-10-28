@@ -12,7 +12,7 @@ import {
   rejectRevisions,
   resolveRevision,
   trackSourceEdit,
-} from './revision'
+} from '@markpage/core/revision'
 import { parseMarkdown } from './markdown'
 
 describe('修订标记识别', () => {
@@ -213,6 +213,16 @@ describe('修订渲染', () => {
     const marks = collect('这是~~删除线~~')
     expect(marks).toHaveLength(1)
     expect(marks[0].className).not.toContain('rev-del')
+  })
+
+  it('整节点就是一条修订时也要渲染（标题 / 列表项 / 独立段落）', () => {
+    for (const source of ['~整段删除~', '# ~标题删除~', '- ~列表项删除~', '> ~引用删除~']) {
+      const marks = collect(source)
+      expect(marks, source).toHaveLength(1)
+      expect(marks[0].tag, source).toBe('del')
+      expect(marks[0].className, source).toContain('rev-del')
+      expect(marks[0].text, source).not.toContain('~')
+    }
   })
 })
 
