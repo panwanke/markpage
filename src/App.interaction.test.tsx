@@ -92,6 +92,18 @@ async function writeRevision(text: string) {
   await click(buttonWithText('.dialog-footer button', 'Write change'))
 }
 
+describe('plugin commands through the application', () => {
+  it('exposes registered plugin commands in their own menu and runs them', async () => {
+    await mount('one two', { mode: 'rendered' })
+    await click(buttonWithText('.menubar-trigger', 'Plugins'))
+    const command = Array.from(host.querySelectorAll<HTMLButtonElement>('.menubar-dropdown .menubar-action'))
+      .find(button => button.textContent?.includes('Focus mode'))!
+    expect(command).toBeTruthy()
+    await click(command)
+    expect(host.querySelector('.app-shell')?.classList.contains('focus-mode')).toBe(true)
+  })
+})
+
 describe('source commands through the application', () => {
   it('uses custom format keys and the document undo/redo history in split mode', async () => {
     await mount('one two', { mode: 'split', keymap: { ...DEFAULT_KEYMAP, 'format.bold': 'Mod+K' } })

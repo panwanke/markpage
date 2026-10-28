@@ -57,6 +57,19 @@ describe('源码位置映射', () => {
   })
 })
 
+describe('块 ID', () => {
+  it('把块末尾的 ^id 挂到块上并从正文里摘掉', () => {
+    const tree = parseMarkdown('一段正文 ^blk-1\n\n另一段。\n')
+    let blockId = ''
+    visit(tree, 'element', (node) => {
+      if (node.properties?.dataBlockId) blockId = String(node.properties.dataBlockId)
+    })
+    expect(blockId).toBe('blk-1')
+    expect(toString(tree)).toContain('一段正文')
+    expect(toString(tree)).not.toContain('^blk-1')
+  })
+})
+
 describe('Markdown 排版与页面配置', () => {
   it('解析标题、公式和自定义评论锚点', () => {
     const tree = parseMarkdown('# 标题\n\n<comment id="c1">正文</comment> 与 $x^2$。')

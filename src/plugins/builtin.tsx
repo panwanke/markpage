@@ -15,6 +15,7 @@ export const focusModePlugin: MarkPagePlugin = {
     api.registerCommand({
       id: 'focus-mode.toggle',
       title: '切换专注模式',
+      titleKey: 'cmd.focusMode',
       run: () => window.dispatchEvent(new CustomEvent('markpage:focus-mode')),
     })
   },

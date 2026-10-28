@@ -98,6 +98,7 @@ import { MARKDOWN_EXTENSION } from './lib/localfs'
 import type { LocalFileEntry } from './lib/localfs'
 import { MARKDOWN_EXTENSION as OPENABLE_EXTENSION } from './lib/localfs'
 import { hashContent } from './lib/hash'
+import { findAnchorElement } from './lib/anchors'
 import { useWorkspace } from './hooks/useWorkspace'
 import { useBuiltinPlugins } from './hooks/useBuiltinPlugins'
 import WorkspaceDialog from './components/WorkspaceDialog'
@@ -111,7 +112,6 @@ import {
   buildVaultIndex,
   buildVaultTree,
   clearVaultCache,
-  detectVault,
   unresolvedLinks,
   vaultFingerprint,
   vaultNoteSummaries,
@@ -428,11 +428,8 @@ export default function App() {
       return
     }
     setVaultTree(buildVaultTree(vaultSession.files))
-    let cancelled = false
-    void detectVault(vaultSession.handle)
-      .then((config) => { if (!cancelled) setVaultConfig(config) })
-      .catch(() => { if (!cancelled) setVaultConfig(null) })
-    return () => { cancelled = true }
+    // 会话在扫描前已经探测过 `.obsidian`，这里不再重复读盘。
+    setVaultConfig(vaultSession.vaultConfig)
   }, [vaultSession])
 
   // 索引：扫描完（不是在扫）且确实有文件时才建，避免拿半份列表算出错的链接关系。
@@ -496,8 +493,9 @@ export default function App() {
   useEffect(() => {
     if (!pendingAnchor) return
     const timer = window.setTimeout(() => {
-      const target = document.querySelector(`.markdown-body #${CSS.escape(pendingAnchor.anchor)}`)
-      target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      // 标题按文字匹配、块按 data-block-id 匹配；不再拿原始 anchor 当 DOM id。
+      const target = findAnchorElement(pendingAnchor.anchor)
+      target?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
       target?.classList.add('anchor-flash')
       window.setTimeout(() => target?.classList.remove('anchor-flash'), 1400)
       setPendingAnchor(null)
@@ -676,12 +674,16 @@ export default function App() {
   const {
     editorModes,
     plugins: builtinPlugins,
+    commands: pluginCommands,
+    renderers: registeredRenderers,
     activeIds: activePluginIds,
     synced: pluginsSynced,
   } = useBuiltinPlugins({
     enabledPluginIds: settings.enabledPluginIds,
     getDocument: () => (activeDocument ? { id: activeDocument.id, markdown } : null),
   })
+  // 注册表按版本号缓存列表快照，所以这里的数组引用只在插件启停时变化，不会破坏 Markdown 的 memo。
+  const pluginRenderers = registeredRenderers
 
   const pluginMode = isPluginEditorMode(mode)
     ? editorModes.find((entry) => pluginEditorMode(entry.pluginId) === mode)
@@ -1601,7 +1603,7 @@ export default function App() {
     onCopyPath: copyDocumentPath,
   }
 
-  const menus: MenuBarMenu[] = MENU_GROUPS.map((group) => ({
+  const coreMenus: MenuBarMenu[] = MENU_GROUPS.map((group) => ({
     id: group.id,
     label: t(group.labelKey),
     entries: COMMANDS.filter((command) => command.group === group.id).map((command) => ({
@@ -1613,6 +1615,19 @@ export default function App() {
       onSelect: () => executeCommand(command.id),
     })),
   }))
+  // 插件命令不是核心 CommandId，不能进快捷键表；给它们一个独立的菜单入口。
+  const pluginMenu: MenuBarMenu = {
+    id: 'plugins',
+    label: t('menu.plugins'),
+    entries: pluginCommands.map((command) => ({
+      id: command.id,
+      label: command.titleKey ? t(command.titleKey) : command.title,
+      onSelect: command.run,
+    })),
+  }
+  const menus: MenuBarMenu[] = pluginCommands.length
+    ? [...coreMenus.slice(0, -1), pluginMenu, ...coreMenus.slice(-1)]
+    : coreMenus
 
   const panels: PanelDescriptor[] = [
     {
@@ -1673,6 +1688,7 @@ export default function App() {
         <LinksPanel
           inVault={Boolean(activeVaultPath)}
           progress={indexProgress}
+          partial={Boolean(vaultIndex?.partial)}
           backlinks={backlinks}
           unresolved={unresolved}
           onOpen={(path) => { void openVaultPath(path) }}
@@ -1816,6 +1832,8 @@ export default function App() {
               <div className="editor-pane">
                 <MarkdownDocument
                   markdown={markdown}
+                  documentId={activeDocument.id}
+                  pluginRenderers={pluginRenderers}
                   config={config}
                   viewMode={mode === 'split' ? 'continuous' : settings.viewMode}
                   obsidianSyntax={settings.obsidianSyntax}
@@ -2037,7 +2055,7 @@ export default function App() {
         indexStatus={indexProgress
           ? t('vault.indexing', indexProgress)
           : vaultIndex
-            ? t('vault.indexReady')
+            ? t(vaultIndex.partial ? 'vault.indexPartial' : 'vault.indexReady')
             : t('vault.indexIdle')}
         onVaultSettings={(patch) => updateSettings(patch)}
         onRebuildIndex={() => { void rebuildVaultIndex() }}

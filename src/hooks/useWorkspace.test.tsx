@@ -261,6 +261,11 @@ describe('工作空间会话', () => {
     expect(api.diskStates.get('doc-1')).toBe('readonly')
     expect(state.writes).toHaveLength(0)
     expect(state.roots.get('A')!.files.get('a.md')!.content).toBe('原文')
+
+    // flush 不能把「只读、没写」当成成功：调用方会据此用磁盘旧内容覆盖浏览器副本。
+    let flushed: boolean | undefined
+    await act(async () => { flushed = await api.flush(api.session!.id) })
+    expect(flushed).toBe(false)
   })
 
   it('磁盘被外部改过时进入冲突，不静默覆盖', async () => {

@@ -140,8 +140,13 @@ function inferAttachmentFolder(assets: Map<string, FileSystemFileHandle>): strin
   return best
 }
 
+export interface ScanVaultOptions {
+  /** 已识别过的库配置；显式传 `null` 表示普通文件夹，不再重复探测 `.obsidian`。 */
+  config?: VaultConfig | null
+}
+
 /** 扫一遍目录：Markdown 进列表，附件进句柄表，其余忽略。 */
-export async function scanVault(root: FileSystemDirectoryHandle): Promise<VaultScan> {
+export async function scanVault(root: FileSystemDirectoryHandle, options: ScanVaultOptions = {}): Promise<VaultScan> {
   const entries: LocalFileEntry[] = []
   const assets = new Map<string, FileSystemFileHandle>()
   let truncated = false
@@ -168,7 +173,7 @@ export async function scanVault(root: FileSystemDirectoryHandle): Promise<VaultS
   }
 
   await walk(root, '', 1)
-  const config = await detectVault(root)
+  const config = options.config === undefined ? await detectVault(root) : options.config
   // 只有「app.json 里压根没写附件目录」时才推断：`/` 与 `./` 归一化后是空串 / 点，
   // 拿推断结果覆盖它们，恰好改错 Obsidian 最常见的两种配置。
   if (config && !config.attachmentExplicit) config.attachmentFolder = inferAttachmentFolder(assets)
@@ -222,6 +227,7 @@ export function countVaultFiles(nodes: VaultNode[]): number {
  * ------------------------------------------------------------------ */
 
 const DB_NAME = 'markpage.vault'
+const DB_VERSION = 2
 const STORE = 'files'
 /** 库标识与相对路径之间的分隔符：路径里不会出现 `\u0000`。 */
 const SEP = '\u0000'
@@ -251,14 +257,18 @@ interface CachedFile {
   blocks: string[]
   tags: string[]
   aliases: string[]
+  /** 是否完整解析过；false 表示只因体积 / 预算被跳过，只索引了路径。 */
+  complete: boolean
 }
 
 function openDatabase(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)
   return new Promise((resolve) => {
-    const request = indexedDB.open(DB_NAME, 1)
+    const request = indexedDB.open(DB_NAME, DB_VERSION)
     request.onupgradeneeded = () => {
+      // v1 可能缓存过「跳过但没标 partial」的条目，升级时整体丢掉重读一次。
       if (!request.result.objectStoreNames.contains(STORE)) request.result.createObjectStore(STORE)
+      else request.transaction?.objectStore(STORE).clear()
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => resolve(null)
@@ -402,15 +412,26 @@ export async function buildVaultIndex(entries: LocalFileEntry[], options: BuildI
     let cached: CachedFile | null = null
     try {
       const file = await entry.handle.getFile()
-      bytes += file.size
       const hit = cache.get(entry.path)
       if (hit && hit.mtime === file.lastModified && hit.size === file.size) {
         cached = hit
-      } else if (file.size > VAULT_MAX_FILE_BYTES || bytes > budget) {
+        // 跳过状态也会缓存；命中时必须把 partial 一起带回来，否则第二次建索引会假装完整。
+        if (!hit.complete) partial = true
+      } else if (file.size > VAULT_MAX_FILE_BYTES || bytes + file.size > budget) {
         partial = true
-        cached = { mtime: file.lastModified, size: file.size, links: [], headings: [], blocks: [], tags: [], aliases: [] }
+        cached = {
+          mtime: file.lastModified,
+          size: file.size,
+          links: [],
+          headings: [],
+          blocks: [],
+          tags: [],
+          aliases: [],
+          complete: false,
+        }
         fresh.set(entry.path, cached)
       } else {
+        bytes += file.size
         const markdown = await file.text()
         const links: LinkReference[] = extractWikilinks(markdown).map((link) => ({
           from: entry.path,
@@ -426,6 +447,7 @@ export async function buildVaultIndex(entries: LocalFileEntry[], options: BuildI
           blocks: extractBlockIds(markdown),
           tags: [...frontmatterTags(markdown), ...extractTags(markdown)],
           aliases: frontmatterAliases(markdown),
+          complete: true,
         }
         fresh.set(entry.path, cached)
       }

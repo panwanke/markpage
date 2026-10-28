@@ -35,6 +35,7 @@ export const zhCN = {
   'menu.revision': '修订',
   'menu.view': '视图',
   'menu.tabs': '标签页',
+  'menu.plugins': '插件',
   'menu.help': '帮助',
   'menu.label': '主菜单',
 

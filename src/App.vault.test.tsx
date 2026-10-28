@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { createDocument, DEFAULT_SETTINGS } from './lib/storage'
 import type { SidebarLayout } from './lib/layout'
-import { createObsidianVault, type FakeVault } from './test/fake-vault'
+import { createFakeVault, createObsidianVault, type FakeVault } from './test/fake-vault'
 import { setLocale } from './i18n'
 
 let root: Root | undefined
@@ -132,6 +132,24 @@ describe('Obsidian 库的端到端流程', () => {
     await click(treeRow('notes'))
     expect(treeRow('C')).toBeTruthy()
     // 附件不进笔记树，只报数量（目录来自 app.json 的 attachmentFolderPath）。
+    expect(host.querySelector('.local-folder')?.textContent).toContain('1 attachments')
+  })
+
+  it('实际会话使用库扫描：支持 8 层目录并推断附件目录', async () => {
+    await mountApp()
+    const vault = createFakeVault({
+      '.obsidian/app.json': '{}',
+      'a/b/c/d/e/Deep.md': '# 深层笔记\n',
+      'attachments/pic.png': 'png',
+    }, 'MyVault')
+    await connect(vault)
+
+    // 旧路径用普通扫描器最多 4 层，Deep.md 根本不会出现在结果里。
+    for (const folder of ['a', 'b', 'c', 'd', 'e']) {
+      await click(treeRow(folder))
+    }
+    expect(treeRow('Deep')).toBeTruthy()
+    // app.json 没写 attachmentFolderPath：从附件最多的目录推断。
     expect(host.querySelector('.local-folder')?.textContent).toContain('1 attachments')
   })
 

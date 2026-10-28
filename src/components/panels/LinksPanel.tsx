@@ -12,6 +12,8 @@ interface LinksPanelProps {
   inVault: boolean
   /** 索引构建进度；null 表示没在构建。 */
   progress: { done: number; total: number } | null
+  /** 索引只覆盖了部分文件（超大文件 / 读取失败 / 总量触顶）。 */
+  partial?: boolean
   backlinks: BacklinkRow[]
   unresolved: string[]
   onOpen: (path: string) => void
@@ -22,7 +24,7 @@ interface LinksPanelProps {
  * 链接面板：上面是「谁引用了我」，下面是「我引用了但找不到的」。
  * 两块都要区分「索引还没建好」与「确实为空」，否则用户会以为功能坏了。
  */
-export default function LinksPanel({ inVault, progress, backlinks, unresolved, onOpen, onCreate }: LinksPanelProps) {
+export default function LinksPanel({ inVault, progress, partial = false, backlinks, unresolved, onOpen, onCreate }: LinksPanelProps) {
   const { t } = useI18n()
   const indexing = Boolean(progress)
 
@@ -35,6 +37,7 @@ export default function LinksPanel({ inVault, progress, backlinks, unresolved, o
       <div className="links-section">
         <h3><Link2 size={13} /> {t('links.backlinks')}<span className="links-count">{backlinks.length}</span></h3>
         {progress && <p className="local-file-empty">{t('vault.indexing', progress)}</p>}
+        {!indexing && partial && <p className="local-file-empty is-warning">{t('vault.indexPartial')}</p>}
         {!indexing && !backlinks.length && <p className="local-file-empty">{t('links.backlinksEmpty')}</p>}
         {backlinks.map((row) => (
           <button key={`${row.from}-${row.snippet}`} className="link-row" title={row.from} onClick={() => onOpen(row.from)}>

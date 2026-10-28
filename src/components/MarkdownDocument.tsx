@@ -8,6 +8,8 @@ import { getRootBlocks, parseMarkdown } from '../lib/markdown'
 import type { ResolvedLink, WikilinkTarget } from '../lib/links'
 import { basenameNoExtension } from '../lib/links'
 import { MAX_EMBED_DEPTH } from '../lib/embeds'
+import { applyPluginRenderers } from '../plugins/apply'
+import type { MarkdownPluginRenderer } from '../plugins/apply'
 import type { PageConfig, SelectionMenuRequest, SelectionSnapshot } from '../types'
 
 /** 库内跳转需要的全部能力；单文件模式下不传，双链就只显示、不跳转。 */
@@ -38,6 +40,9 @@ interface MarkdownDocumentProps {
   obsidianSyntax?: boolean
   /** 图片等异步资源就绪后 +1：用来触发重新分页。 */
   contentVersion?: number
+  /** 插件渲染器：按 tagName 判断目标是否存在，存在才调用。 */
+  pluginRenderers?: MarkdownPluginRenderer[]
+  documentId?: string
   linkContext?: DocumentLinkContext
   onSelection: (selection: SelectionSnapshot | null) => void
   onCommentOpen: (id: string) => void
@@ -53,6 +58,7 @@ const PAPER = {
 }
 
 const BLOCKED_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'meta', 'link', 'base', 'form'])
+
 
 function safeUrl(value: unknown, image = false) {
   const url = String(value ?? '').trim()
@@ -372,6 +378,8 @@ export default function MarkdownDocument({
   revisionMode,
   obsidianSyntax = true,
   contentVersion = 0,
+  pluginRenderers = [],
+  documentId = '',
   linkContext,
   onSelection,
   onCommentOpen,
@@ -380,7 +388,11 @@ export default function MarkdownDocument({
   onSelectionMenu,
 }: MarkdownDocumentProps) {
   const { t } = useI18n()
-  const tree = useMemo(() => parseMarkdown(markdown, obsidianSyntax), [markdown, obsidianSyntax])
+  const tree = useMemo(() => {
+    const parsed = parseMarkdown(markdown, obsidianSyntax)
+    if (!pluginRenderers.length) return parsed
+    return applyPluginRenderers(parsed, pluginRenderers, { documentId, markdown })
+  }, [markdown, obsidianSyntax, pluginRenderers, documentId])
   const blocks = useMemo(() => getRootBlocks(tree).filter((node) => !isCommentCallout(node)), [tree])
   const [pages, setPages] = useState<RootContent[][]>([blocks])
   const measureRef = useRef<HTMLDivElement>(null)

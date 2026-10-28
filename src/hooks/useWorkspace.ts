@@ -22,7 +22,9 @@ import {
   workspaceRootKey,
   writeLocalFile,
 } from '../lib/localfs'
-import type { LocalFileEntry, PermissionStatus } from '../lib/localfs'
+import type { LocalFileEntry, PermissionStatus, ScanResult } from '../lib/localfs'
+import { detectVault, scanVault } from '../lib/vault'
+import type { VaultConfig } from '../lib/vault'
 import {
   createWorkspaceId,
   loadWorkspaceStore,
@@ -40,6 +42,8 @@ import type { DiskBaseline, DiskState, DocumentBinding, MarkdownDocument } from 
 
 /** 连续输入只落一次盘：与旧的 600ms 防抖保持一致。 */
 const WRITE_DEBOUNCE = 600
+/** flush 期间又产生新输入时最多再追几轮，避免一次切根把最后一段输入落下。 */
+const MAX_FLUSH_ROUNDS = 3
 
 export interface WorkspaceSession {
   id: string
@@ -48,6 +52,8 @@ export interface WorkspaceSession {
   files: LocalFileEntry[]
   /** 库内附件句柄（图片 / PDF / 音视频）：正文按相对路径取图要用。 */
   assets: Map<string, FileSystemFileHandle>
+  /** 识别到的 Obsidian 配置；普通文件夹为 null。 */
+  vaultConfig: VaultConfig | null
   truncated: boolean
   scanning: boolean
   readPermission: PermissionStatus
@@ -297,7 +303,13 @@ export function useWorkspace(options: UseWorkspaceOptions) {
     scheduleWrite(doc.id)
   }, [scheduleWrite, setDiskState])
 
-  /** 切根 / 断开 / 退出前：停掉防抖、把待写的都写完，并等干净。 */
+  /**
+   * 切根 / 断开 / 退出前：停掉防抖、把待写的都写完，并等干净。
+   *
+   * 不能只看「写操作有没有抛错」：只读根会直接返回、写盘期间的新输入会重新排队，
+   * 这两种情况都算没落盘。判定必须同时看磁盘状态与最终内容，否则调用方会误以为
+   * 可以安全地用磁盘版本覆盖浏览器副本。
+   */
   const flush = useCallback(async (workspaceId?: string) => {
     const docs = optionsRef.current.getDocuments().filter((doc) => {
       if (!doc.binding) return false
@@ -311,14 +323,29 @@ export function useWorkspace(options: UseWorkspaceOptions) {
         timersRef.current.delete(doc.id)
       }
     }
-    let ok = true
-    for (const doc of docs) {
-      await requestWrite(doc.id)
+
+    const pendingDocs = () => docs.filter((doc) => {
+      const latest = optionsRef.current.getDocuments().find((item) => item.id === doc.id)
+      if (!latest?.binding) return false
       const state = diskStateRef.current.get(doc.id)
-      if (state === 'error' || state === 'conflict') ok = false
+      if (state) return state !== 'clean'
+      // 没有状态记录时用基准兜底：内容与基准一致就没有需要写的改动。
+      return latest.diskBaseline?.hash !== hashContent(latest.markdown)
+    })
+
+    for (let round = 0; round < MAX_FLUSH_ROUNDS; round += 1) {
+      await Promise.allSettled(docs.map((doc) => requestWrite(doc.id)))
+      await Promise.allSettled([...inFlightRef.current.values()])
+      const pending = pendingDocs()
+      if (!pending.length) return true
+      // 只读、冲突与写失败不会靠重试自愈；立即返回失败，让调用方保留浏览器副本。
+      const blocked = pending.some((doc) => {
+        const state = diskStateRef.current.get(doc.id)
+        return state === 'readonly' || state === 'error' || state === 'conflict'
+      })
+      if (blocked) return false
     }
-    await Promise.allSettled([...inFlightRef.current.values()])
-    return ok
+    return pendingDocs().length === 0
   }, [requestWrite])
 
   const mountSession = useCallback(async (input: {
@@ -340,6 +367,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       handle: input.handle,
       files: [],
       assets: new Map(),
+      vaultConfig: null,
       truncated: false,
       scanning: readPermission === 'granted',
       readPermission,
@@ -349,9 +377,28 @@ export function useWorkspace(options: UseWorkspaceOptions) {
     applySession(base)
     if (readPermission !== 'granted') return base
     try {
-      const { entries, truncated, assets } = await scanDirectory(input.handle)
+      // 先认库再扫描：Obsidian 库用 8 层 / 5000 文件并推断附件目录，
+      // 普通文件夹仍保持 4 层 / 2000 文件，避免把任意大目录全量塞进界面。
+      const detected = await detectVault(input.handle)
       if (token !== scanTokenRef.current) return null
-      const next: WorkspaceSession = { ...base, files: entries, assets, truncated, scanning: false }
+      let scan: ScanResult
+      let vaultConfig: VaultConfig | null = null
+      if (detected) {
+        const vaultScan = await scanVault(input.handle, { config: detected })
+        scan = { entries: vaultScan.entries, assets: vaultScan.assets, truncated: vaultScan.truncated }
+        vaultConfig = vaultScan.config ?? detected
+      } else {
+        scan = await scanDirectory(input.handle)
+      }
+      if (token !== scanTokenRef.current) return null
+      const next: WorkspaceSession = {
+        ...base,
+        files: scan.entries,
+        assets: scan.assets,
+        vaultConfig,
+        truncated: scan.truncated,
+        scanning: false,
+      }
       applySession(next)
       return next
     } catch {

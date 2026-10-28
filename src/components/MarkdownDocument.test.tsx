@@ -2,9 +2,13 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { Root } from 'react-dom/client'
+import { visit } from 'unist-util-visit'
+import type { Root as HastRoot } from 'hast'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import MarkdownDocument from './MarkdownDocument'
 import type { DocumentLinkContext } from './MarkdownDocument'
+import { applyPluginRenderers } from '../plugins/apply'
+import { parseMarkdown } from '../lib/markdown'
 import { DEFAULT_PAGE_CONFIG } from '../lib/markdown'
 import type { ResolvedLink, WikilinkTarget } from '../lib/links'
 import { setLocale } from '../i18n'
@@ -66,6 +70,33 @@ function click(element: Element | null) {
     element!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
   })
 }
+
+describe('插件渲染器', () => {
+  it('只在目标标签存在时改写渲染副本，不污染解析缓存', () => {
+    const tree = parseMarkdown('一段正文')
+    const renderers = [{
+      tagName: 'p',
+      renderer: (node: HastRoot) => {
+        visit(node, 'element', (element) => {
+          if (element.tagName === 'p') element.properties = { ...element.properties, className: ['plugin-marked'] }
+        })
+        return node
+      },
+    }]
+    const output = applyPluginRenderers(tree, renderers, { documentId: 'd1', markdown: '一段正文' })
+    expect(JSON.stringify(output)).toContain('plugin-marked')
+    expect(JSON.stringify(tree)).not.toContain('plugin-marked')
+  })
+
+  it('渲染器抛错时保留原正文', () => {
+    const tree = parseMarkdown('仍然可读')
+    const output = applyPluginRenderers(tree, [{
+      tagName: 'p',
+      renderer: () => { throw new Error('boom') },
+    }], { documentId: 'd1', markdown: '仍然可读' })
+    expect(JSON.stringify(output)).toContain('仍然可读')
+  })
+})
 
 describe('MarkdownDocument 的库内交互', () => {
   it('点击已解析的双链会带锚点跳转', async () => {

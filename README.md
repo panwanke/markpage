@@ -40,12 +40,12 @@ MarkPage turns a `.md` file into a paginated, printable document you can mark up
 | Menu bar and shortcuts | The menu bar lists every command together with the key binding **currently in effect**; bindings are recorded per-row under Settings → Shortcuts, conflicts are reported on the spot instead of silently overwriting |
 | Undo / redo | One stack per document, consecutive input within 600 ms merged into a single step; undo restores a full snapshot, revision marks included |
 | Document context menu | Workspace rows and tabs share one menu: open, rename, duplicate, export `.md`, save to disk, reload from disk, copy path, unbind, close, delete. Reachable with `Shift+F10` or the Menu key; focus returns to the trigger on close |
-| Disk binding | Connect a directory on disk (File System Access API), list its `.md` files, read on click and write edits back to the original file; per-document debounced serial writes, baseline-hash conflict detection, read-only and error states shown separately from the browser autosave state; up to 2000 files per scan, with a truncation notice at the cap |
+| Disk binding | Connect a directory on disk (File System Access API), list its `.md` files, read on click and write edits back to the original file; per-document debounced serial writes, baseline-hash conflict detection, read-only and error states shown separately from the browser autosave state; up to 2000 files per scan for a plain folder (a folder recognised as an Obsidian vault goes through the vault scanner: 8 levels, 5000 files), with a truncation notice at the cap |
 | Dockable sidebar | Example library / workspace / outline are draggable panels: drop one onto another to merge into tabs, drop onto the bottom zone to split into a new group; closable, resizable, collapsible; layout persisted |
 | Internationalisation | Chinese / English with instant switching; one flat key table per language, adding a language means adding one file and registering it, and type checking guarantees no missing keys |
 | Appearance | UI font family and scale (115% by default, sidebar, status bar and comment panel scale with it), body font family; saved locally |
 | Three export modes | **Direct** takes everything as-is; **clean** strips comment anchors, comment blocks and highlight colours; **custom** maps colours to your own classes / inline styles, with live preview |
-| Plugin API | Command, renderer, editor-mode, document-access and lifecycle APIs (API 1.1); built-in plugins can be switched on and off in Settings → Plugins, and disabling one removes its commands, renderers and editor modes |
+| Plugin API | Command, renderer, editor-mode, document-access and lifecycle APIs (API 1.1); built-in plugins can be switched on and off in Settings → Plugins, and disabling one removes its commands, renderers and editor modes. Plugin commands get their own **Plugins** menu (they are outside the remappable core keymap), and tree renderers run on a copy of the parsed tree, so a plugin can neither corrupt the render cache nor take the whole document down with an exception |
 | Live editing | Optional built-in plugin: a single continuous CodeMirror 6 view that hides Markdown markers on non-active lines and shows them on the cursor line; Markdown stays the single source of truth, IME-safe, off by default |
 
 Page setup is written into the YAML frontmatter; user name, view toggles, language, sidebar layout and appearance (font / scale) live in browser storage. UI scale is applied through the `--ui-scale` CSS variable, sidebar and comment-panel widths follow `--ui-width` (relative to the 115% default), and body text uses `--doc-font`, so app chrome never interferes with the document's own font size and line height.
@@ -60,7 +60,9 @@ The toolbar switches between `Typeset / Split / Source`. Split means rendered on
 
 ## Menu bar and shortcuts
 
-The top-left of the header is a menu bar: **File / Edit / Format / Revision / View / Tabs / Help**. The binding shown next to each item is computed from the live keymap, so remapping a shortcut updates the menu immediately — the menu is documentation for the keymap.
+The top-left of the header is a menu bar: **File / Edit / Format / Revision / View / Vault / Tabs / Help**. The binding shown next to each item is computed from the live keymap, so remapping a shortcut updates the menu immediately — the menu is documentation for the keymap.
+
+A **Plugins** menu appears between Tabs and Help as soon as an enabled plugin registers a command. Plugin commands carry no key binding and are not part of `COMMANDS`, so they never collide with a core shortcut and cannot be remapped in Settings → Shortcuts; the menu entry is their only trigger. Disabling the plugin removes both the command and the menu.
 
 Commands live in `COMMANDS` in `src/lib/shortcuts.ts`: one command = id + group + label key + default binding. The menu bar, the global listener and the settings panel are all derived from that single table; adding a command is one row, and the UI picks it up.
 
@@ -107,11 +109,11 @@ Three entry points, one document model; the only difference is where the content
 
 Chromium also returns a real handle on drop (`getAsFileSystemHandle()`), so a dropped file binds to disk and edits are written back, exactly like a file from the local folder; **dropping a directory connects it as a working directory**. Without handle support (Firefox / Safari) the content is copied into the browser instead.
 
-**Folder workspaces**: the file menu opens a system directory picker (`Open Folder…`), and every folder you open is remembered as a workspace you can switch back to (`Open Recent…`). The picker searches up to four levels deep for Markdown and skips `node_modules`, `.git`, `.obsidian` and similar. Opening a file binds it to `workspaceId + path`, so `notes/index.md` in two different roots are two different files and never write into each other.
+**Folder workspaces**: the file menu opens a system directory picker (`Open Folder…`), and every folder you open is remembered as a workspace you can switch back to (`Open Recent…`). The picker searches up to four levels deep for Markdown and skips `node_modules`, `.git`, `.obsidian` and similar. A folder that contains `.obsidian/` is recognised before scanning and handed to the vault scanner instead (8 levels, 5000 files — see [Obsidian vault](#obsidian-vault)), so a vault is never silently cut down to the plain-folder limits. Opening a file binds it to `workspaceId + path`, so `notes/index.md` in two different roots are two different files and never write into each other.
 
 - One workspace is mounted at a time. Switching first flushes pending writes; if a write still fails you get a single confirmation: cancel to stay and fix it, or continue and keep that change in the browser only.
 - Recent workspaces and up to 20 recent files (across workspaces, deduplicated by `workspaceId + path`) are listed in the same dialog. Jumping to a file from another workspace switches the root first, then opens it.
-- A scan collects at most 2000 files (Obsidian vaults routinely hold thousands of notes and rendering them all would freeze the UI); hitting the cap reports "showing the first N".
+- A plain folder scan collects at most 2000 files and 4 levels of depth; an Obsidian vault gets 5000 files and 8 levels. Either way, hitting the cap reports "showing the first N" instead of pretending the list is complete.
 - Directory handles live in IndexedDB and are restored on the next page load, but write permission is only **queried** at that point, not requested: when it has expired the panel shows an "authorise writing" button. A read-only root shows a read-only state instead of silently failing.
 - Edits are written back per document after a 600 ms debounce, one write at a time per document. A failed write (permission revoked, file deleted) keeps the browser copy and reports it **once** — the state stays on the failed document until a later write succeeds, so a dead path cannot turn into a stream of toasts. Body text is never lost.
 - Writes that were still queued when the page closed are re-queued as soon as the workspace is restored (or as soon as write permission is granted again) — the quiet 600 ms window cannot hide an unwritten change behind a reload.
@@ -133,27 +135,28 @@ Only `.obsidian/app.json` is read (`attachmentFolderPath`, `useMarkdownLinks`, `
 | Syntax | Behaviour |
 | :--- | :--- |
 | `[[Note]]`, `[[Note\|alias]]` | Resolved as exact path → relative path → file name (shortest) → alias, then opened in place. Unresolved links are greyed out and listed in the links panel |
-| `[[Note#Heading]]`, `[[Note#^block]]`, `[[#Here]]` | Opens the note and scrolls to the heading (matched by text, not by slug) or to the block id |
+| `[[Note#Heading]]`, `[[Note#^block]]`, `[[#Here]]` | Opens the note and scrolls to the heading (matched by its rendered text, not by slug) or to the block id. The lookup only searches the rendered pages, so the off-screen measurement layer used for pagination can never answer the jump |
 | `![[Note]]`, `![[Note#Heading]]` | The note body is inlined **read-only**: no source offsets, no comment anchors, up to 3 levels deep. A cycle or a missing target shows a labelled placeholder with a jump button |
 | `![[image.png]]` | Asset via blob URL; looked up as absolute path → relative to the note → `attachmentFolderPath` → unique file name in the vault |
 | `[text](Note.md)` | Treated as an in-vault link when it resolves, otherwise a normal external link |
 | `> [!type]`, `> [!type]-`, `> [!type]+` | Callout with per-type colours; `-` / `+` fold it into a `<details>` |
 | `#tag`, `#parent/child` | Styled and clickable — opens the quick switcher pre-filled with that tag |
 | `==highlight==` | `<mark>` |
+| `^block-id` at the end of a block | Stripped from the visible text and kept as `data-block-id`, which is what `[[Note#^block-id]]` jumps to |
 | `%%comment%%` | Hidden |
 | frontmatter `tags` / `aliases` | Read for the index, the backlinks panel and the quick switcher |
 
 Three panels and one dialog complete the loop:
 
 - **Vault tree** in the workspace panel (collapsible folders, Obsidian badge, attachment count).
-- **Links panel**: backlinks to the current note with the matching line as context, plus every link in the note that does not resolve yet — each one offers "create note", the only place MarkPage writes a *new* file.
+- **Links panel**: backlinks to the current note with the matching line as context, plus every link in the note that does not resolve yet — each one offers "create note", the only place MarkPage writes a *new* file. When the index stopped short (file cap, 64 MB budget or an unreadable note) the panel says "index is incomplete, some links may not resolve" instead of presenting a short backlink list as the whole truth.
 - **Quick switcher** (`Mod+O`): fuzzy over title / alias / path, `↑` `↓` `Enter` `Esc`, and `#tag` to filter by tag.
 - **Follow link** (`Mod+Enter`) opens the `[[wikilink]]` under the caret; **new note** (`Mod+Shift+N`) creates an untitled note next to the current one (numbered when the name is taken) and opens it.
 - **Conflict dialog**: see write-back below.
 
-**Write-back.** Markdown stays the single source of truth, and MarkPage never rewrites a file wholesale. Page settings touch only the keys it owns (`title` / `header` / `footer` / `paper` / `fontSize` / `lineHeight`), edited line by line: key order, comments, quoting style and CRLF line endings survive, and invalid YAML is left untouched instead of being re-serialised. Before every write the file's mtime and size are compared with what was read; if another program changed it, the write stops and the dialog offers *reload from disk* / *save a copy* / *overwrite*. The previous content is kept in `localStorage` while a write is in flight, so an interrupted write can be recovered on the next load.
+**Write-back.** Markdown stays the single source of truth, and MarkPage never rewrites a file wholesale. Page settings touch only the keys it owns (`title` / `header` / `footer` / `paper` / `fontSize` / `lineHeight`), edited line by line: key order, comments, quoting style and CRLF line endings survive, and invalid YAML is left untouched instead of being re-serialised. Before every write the file's mtime and size are compared with what was read; if another program changed it, the write stops and the same conflict dialog as everywhere else appears — *use the disk version* or *keep my changes as a copy*. There is deliberately no overwrite exit: automatic writing stays paused until you choose. The write itself goes through a writable stream that only replaces the file on `close()`, so a page that dies mid-write leaves the original file intact, and the unsaved change stays in the browser copy and is re-queued on the next load.
 
-Vaults are scanned to 8 levels and 5000 files, indexing reads at most 512 KB per note and caches results in IndexedDB (keyed by mtime + size), so reconnecting a large vault is fast. Indexing runs in a Web Worker and falls back to the main thread wherever Workers are unavailable or blocked. Settings → Obsidian toggles the syntax layer and external-change detection, and can rebuild the index.
+Vaults are scanned to 8 levels and 5000 files, indexing reads at most 512 KB per note and 64 MB in total, and caches results in IndexedDB keyed by mtime + size, so reconnecting a large vault is fast. A note skipped by either budget is cached as *incomplete* rather than as an empty file, so the "index is incomplete" warning survives a reconnect instead of a partial index quietly passing for a complete one. Indexing runs in a Web Worker and falls back to the main thread wherever Workers are unavailable or blocked. Settings → Obsidian toggles the syntax layer and external-change detection, and can rebuild the index.
 
 Not supported, by design: community plugin syntax (Dataview, Templater, Excalidraw), `.canvas`, the graph view, publish / sync, and renaming or deleting notes from inside MarkPage — renaming breaks every link pointing at the note, so it belongs in Obsidian, which can update them.
 
@@ -232,7 +235,7 @@ Documents under `examples/` are bundled into the app, loadable from the sidebar'
 | Markdown pipeline | unified (remark-parse → remark-gfm / math / frontmatter → remark-rehype → rehype-raw / slug / katex / highlight) |
 | Math and code | KaTeX, lowlight / highlight.js (common languages only) |
 | Styling | Plain CSS with custom properties (`--ui-scale`, `--ui-width`, `--doc-font`); no UI framework |
-| Testing | Vitest — 206 cases covering the rendering pipeline, revisions, export, i18n, shortcuts, tabs and storage |
+| Testing | Vitest — 439 cases across 31 files: rendering pipeline, revisions, export, i18n, shortcuts, tabs, storage, the vault index and the workspace write queue |
 | Static analysis | oxlint + `tsc -b` |
 
 There is no backend at runtime: documents and preferences live in localStorage, directory handles in IndexedDB, and export goes through the browser's download flow.
@@ -245,8 +248,12 @@ src/
                       (including clearing highlights and text colour)
   lib/palette.ts      highlight / text-colour swatches, rgb → hex normalisation (toolbar + right-click)
   lib/localfs.ts      local folders: pick directory, recursive scan, read / write, permissions, handle persistence
+  lib/vault.ts        Obsidian vault: 8-level scan, `.obsidian/app.json`, IndexedDB index cache, partial detection
+  lib/vault-job.ts    index job protocol shared by the main thread and the Worker (testable without a Worker)
+  lib/anchors.ts      heading / block-id anchor lookup, scoped to the rendered pages
   lib/workspace-store.ts  recent workspaces and recent files: normalise, dedupe, sort, 20-entry cap
   lib/hash.ts         synchronous content hash for the disk baseline (conflict detection)
+  lib/disk.ts         baseline fingerprint: content hash decides conflicts, lastModified is display only
   lib/revision.ts     revisions: recognise ~deletion~ / <ins>insertion</ins>, math and code guards,
                       accept / reject, and inferring revision marks from typing, backspace and paste
   lib/highlight.ts    trimmed code-highlight plugin (common languages only; a new language must also be
@@ -271,10 +278,12 @@ src/
   components/DocumentMenu.tsx     document menu shared by workspace rows and the tab strip
   components/WorkspaceDialog.tsx  recent workspaces and recent files
   components/ConflictDialog.tsx   disk vs browser conflict: adopt disk or save a copy
-  hooks/useWorkspace.ts    mounted workspace session: scan, permissions, per-document write queue, conflicts
+  hooks/useWorkspace.ts    mounted workspace session: vault detection, scan, permissions, per-document write
+                           queue, conflicts, and a flush that reports failure instead of assuming success
   hooks/useBuiltinPlugins.ts  built-in plugin activation and registry lifecycle
   lib/keys.ts         key detection for context menus (Menu key / Shift+F10)
-  plugins/            plugin API types and registry; obsidian-live-editing/ is the CodeMirror live preview
+  plugins/            plugin API types and registry; apply.ts runs renderers on a copy of the tree;
+                      obsidian-live-editing/ is the CodeMirror live preview
   data/examples.ts    example library loading
 ```
 

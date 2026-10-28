@@ -3,16 +3,18 @@ import type {
   MarkPagePluginAPI,
   PluginCommand,
   PluginEditorMode,
-  PluginRendererContext,
+  PluginTreeRenderer,
 } from './types'
 import { PLUGIN_API_VERSION } from './types'
-import type { Root } from 'hast'
 
-type Renderer = (node: Root, context: PluginRendererContext) => Root
+export interface RegisteredRenderer {
+  tagName: string
+  renderer: PluginTreeRenderer
+}
 
 interface PluginRecord {
-  commands: Set<string>
-  renderers: Set<string>
+  commands: Map<string, PluginCommand>
+  renderers: Map<string, PluginTreeRenderer>
   editorModes: Set<string>
   disposers: Array<() => void>
   cleanup?: () => void
@@ -26,11 +28,18 @@ interface PluginRecord {
  */
 export class PluginRegistry {
   private commands = new Map<string, PluginCommand>()
-  private renderers = new Map<string, Renderer>()
+  private renderers = new Map<string, PluginTreeRenderer>()
   private editorModes = new Map<string, PluginEditorMode>()
   private plugins = new Map<string, PluginRecord>()
   private listeners = new Set<() => void>()
   private version = 0
+  /** 快照跟着版本号失效，见 `snapshot()`。 */
+  private snapshotVersion = -1
+  private snapshots: {
+    commands: PluginCommand[]
+    renderers: RegisteredRenderer[]
+    editorModes: PluginEditorMode[]
+  } = { commands: [], renderers: [], editorModes: [] }
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener)
@@ -42,6 +51,24 @@ export class PluginRegistry {
   private bump() {
     this.version += 1
     this.listeners.forEach((listener) => listener())
+  }
+
+  /**
+   * 按版本号缓存的列表快照。
+   *
+   * 宿主拿这几个数组做 memo（渲染器数组直接决定 Markdown 是否重排），每次渲染都返回
+   * 新数组会让 memo 彻底失效。版本号不变时返回同一个引用，插件启停后自动重建。
+   */
+  private snapshot() {
+    if (this.snapshotVersion !== this.version) {
+      this.snapshotVersion = this.version
+      this.snapshots = {
+        commands: Array.from(this.commands.values()),
+        renderers: Array.from(this.renderers, ([tagName, renderer]) => ({ tagName, renderer })),
+        editorModes: Array.from(this.editorModes.values()),
+      }
+    }
+    return this.snapshots
   }
 
   isActive(pluginId: string) {
@@ -60,8 +87,8 @@ export class PluginRegistry {
   activate(plugin: MarkPagePlugin, getDocument: MarkPagePluginAPI['getDocument']) {
     if (this.plugins.has(plugin.id)) return
     const record: PluginRecord = {
-      commands: new Set(),
-      renderers: new Set(),
+      commands: new Map(),
+      renderers: new Map(),
       editorModes: new Set(),
       disposers: [],
     }
@@ -69,9 +96,10 @@ export class PluginRegistry {
       version: PLUGIN_API_VERSION,
       registerCommand: (command) => {
         this.commands.set(command.id, command)
-        record.commands.add(command.id)
+        record.commands.set(command.id, command)
         const dispose = () => {
-          this.commands.delete(command.id)
+          // 两个插件注册同一个 id 时，后注册的拥有当前实现；先停用的那个不能顺手删掉它。
+          if (this.commands.get(command.id) === command) this.commands.delete(command.id)
           record.commands.delete(command.id)
         }
         record.disposers.push(dispose)
@@ -79,9 +107,9 @@ export class PluginRegistry {
       },
       registerRenderer: (tagName, renderer) => {
         this.renderers.set(tagName, renderer)
-        record.renderers.add(tagName)
+        record.renderers.set(tagName, renderer)
         const dispose = () => {
-          this.renderers.delete(tagName)
+          if (this.renderers.get(tagName) === renderer) this.renderers.delete(tagName)
           record.renderers.delete(tagName)
         }
         record.disposers.push(dispose)
@@ -121,19 +149,29 @@ export class PluginRegistry {
       // 插件的清理代码出错不该让宿主卡住，后面还有兜底摘除。
     }
     record.disposers.forEach((dispose) => dispose())
-    record.commands.forEach((id) => this.commands.delete(id))
-    record.renderers.forEach((tag) => this.renderers.delete(tag))
+    // disposers 已经按归属摘除；这里再兜一次底，处理 activate 中途抛错留下的注册项。
+    record.commands.forEach((command, id) => {
+      if (this.commands.get(id) === command) this.commands.delete(id)
+    })
+    record.renderers.forEach((renderer, tag) => {
+      if (this.renderers.get(tag) === renderer) this.renderers.delete(tag)
+    })
     record.editorModes.forEach((id) => this.editorModes.delete(id))
     this.plugins.delete(pluginId)
     this.bump()
   }
 
   listCommands() {
-    return Array.from(this.commands.values())
+    return this.snapshot().commands
   }
 
   listEditorModes() {
-    return Array.from(this.editorModes.values())
+    return this.snapshot().editorModes
+  }
+
+  /** 宿主按 tagName 判断目标节点是否存在，再决定是否调用渲染器。 */
+  listRenderers(): RegisteredRenderer[] {
+    return this.snapshot().renderers
   }
 
   getEditorMode(pluginId: string) {

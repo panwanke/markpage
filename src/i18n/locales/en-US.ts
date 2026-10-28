@@ -37,6 +37,7 @@ export const enUS: Messages = {
   'menu.revision': 'Revision',
   'menu.view': 'View',
   'menu.tabs': 'Tabs',
+  'menu.plugins': 'Plugins',
   'menu.help': 'Help',
   'menu.label': 'Main menu',
 

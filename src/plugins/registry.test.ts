@@ -32,6 +32,7 @@ describe('插件注册表', () => {
     registry.activate(makePlugin('a'), () => null)
     expect(registry.listCommands().map((command) => command.id)).toEqual(['a.run'])
     expect(registry.listEditorModes().map((mode) => mode.pluginId)).toEqual(['a'])
+    expect(registry.listRenderers().map((entry) => entry.tagName)).toEqual(['comment'])
     expect(registry.getEditorMode('a')?.title).toBe('模式')
     expect(registry.isActive('a')).toBe(true)
   })
@@ -53,6 +54,7 @@ describe('插件注册表', () => {
     expect(cleanup).toHaveBeenCalledTimes(1)
     expect(registry.listCommands().map((command) => command.id)).toEqual(['b.run'])
     expect(registry.listEditorModes().map((mode) => mode.pluginId)).toEqual(['b'])
+    expect(registry.listRenderers().map((entry) => entry.tagName)).toEqual(['comment'])
     expect(registry.getEditorMode('a')).toBeUndefined()
     expect(registry.isActive('a')).toBe(false)
   })
@@ -102,5 +104,20 @@ describe('插件注册表', () => {
     expect(cleanup).toHaveBeenCalled()
     expect(registry.listCommands()).toEqual([])
     expect(registry.listEditorModes()).toEqual([])
+    expect(registry.listRenderers()).toEqual([])
+  })
+
+  it('版本号不变时列表快照保持同一引用，变了就重建', () => {
+    const registry = new PluginRegistry()
+    registry.activate(makePlugin('a'), () => null)
+    const renderers = registry.listRenderers()
+    const commands = registry.listCommands()
+    // 宿主直接拿这两个数组做 memo：每次渲染换新数组会让 Markdown 反复重排。
+    expect(registry.listRenderers()).toBe(renderers)
+    expect(registry.listCommands()).toBe(commands)
+
+    registry.activate(makePlugin('b'), () => null)
+    expect(registry.listRenderers()).not.toBe(renderers)
+    expect(registry.listRenderers().map((entry) => entry.tagName)).toEqual(['comment'])
   })
 })

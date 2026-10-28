@@ -7,6 +7,8 @@ import type { SelectionSnapshot } from '../types'
 export interface PluginCommand {
   id: string
   title: string
+  /** 宿主已有译文时用它，避免内置插件把中文标题带进英文界面。 */
+  titleKey?: MessageKey
   run: () => void
 }
 
@@ -14,6 +16,9 @@ export interface PluginRendererContext {
   documentId: string
   markdown: string
 }
+
+/** 渲染器拿到整棵 hast 树：按 tagName 判断是否需要处理，再返回改写后的树。 */
+export type PluginTreeRenderer = (node: Root, context: PluginRendererContext) => Root
 
 /**
  * 编辑器组件能拿到的全部能力。
@@ -58,10 +63,7 @@ export interface PluginEditorMode {
 export interface MarkPagePluginAPI {
   version: '1.1'
   registerCommand: (command: PluginCommand) => () => void
-  registerRenderer: (
-    tagName: string,
-    renderer: (node: Root, context: PluginRendererContext) => Root,
-  ) => () => void
+  registerRenderer: (tagName: string, renderer: PluginTreeRenderer) => () => void
   /** 注册一个编辑模式；停用插件时宿主会一并卸载它。 */
   registerEditorMode: (mode: PluginEditorMode) => () => void
   getDocument: () => { id: string; markdown: string } | null

@@ -55,6 +55,7 @@ export function useBuiltinPlugins({ enabledPluginIds, getDocument }: UseBuiltinP
     plugins: BUILTIN_PLUGINS,
     editorModes: registry.listEditorModes(),
     commands: registry.listCommands(),
+    renderers: registry.listRenderers(),
     activeIds: new Set(BUILTIN_PLUGINS.filter((plugin) => registry.isActive(plugin.id)).map((plugin) => plugin.id)),
   }
 }
