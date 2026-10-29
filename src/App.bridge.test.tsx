@@ -167,11 +167,21 @@ it('Ctrl+S flushes the bridge note without exporting a download', async () => {
 it('pauses for native editing and retries when the native editor is released', async () => {
   writable = true; busy = true
   await mount(); await connectBridge(); await openBridgeNote()
-  await editBridge('Waiting for native editor')
-  await waitFor(() => Boolean(host.textContent?.includes('Native editor busy')))
-  expect(writes).toBe(0)
-  busy = false
-  await waitFor(() => content === 'Waiting for native editor')
+  vi.useFakeTimers()
+  try {
+    await editBridge('Waiting for native editor')
+    await act(async () => { await vi.advanceTimersByTimeAsync(600) })
+    expect(host.textContent).toContain('Native editor busy')
+    expect(writes).toBe(0)
+    busy = false
+    await act(async () => { await vi.advanceTimersByTimeAsync(1499) })
+    expect(writes).toBe(0)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(content).toBe('Waiting for native editor')
+    expect(writes).toBe(1)
+  } finally {
+    vi.useRealTimers()
+  }
 })
 it('surfaces concurrent edits and compares versions without overwriting either', async () => {
   writable = true
