@@ -53,6 +53,10 @@ button:disabled { cursor: default; opacity: .35; }
 
 /* Workspace */
 .workspace { flex: 1; min-height: 0; display: flex; position: relative; }
+.empty-workspace { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; color: #82838d; }
+.empty-workspace h1 { color: #44424f; font-size: calc(18px * var(--ui-scale)); }
+.empty-workspace p { max-width: 440px; line-height: 1.7; font-size: calc(13px * var(--ui-scale)); }
+.empty-workspace-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 12px; }
 
 /* Dock sidebar: 面板组 + 可拖动标签 + 可调宽度 */
 .dock-sidebar { flex: 0 0 auto; min-width: 0; background: #fafafd; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; position: relative; }
@@ -250,11 +254,6 @@ body.is-resizing-columns .source-editor { pointer-events: none; }
 .comment-anchor.is-active { box-shadow: 0 0 0 2px #e9e3ff; }
 
 /* Source */
-.source-editor-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #202129; }
-.source-editor-wrap.is-compact .source-editor { padding: 20px 22px 60px; }
-.source-editor-meta { height: 35px; flex: 0 0 35px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #32333d; color: #777985; font-size: calc(10.5px * var(--ui-scale)); letter-spacing: .12em; }
-.source-editor-meta .revision-live { color: #6fd39a; letter-spacing: .06em; }
-.source-editor { flex: 1; width: 100%; resize: none; border: 0; outline: 0; padding: 24px max(24px, calc((100% - 860px)/2)); background: #202129; color: #d7d5e1; caret-color: #b3a6ff; font: 13px/1.85 "SFMono-Regular", Consolas, monospace; tab-size: 2; }
 
 /* Revision marks */
 .markdown-body ins.rev-ins, .markdown-body ins { color: #146c2e; text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 2px; background: rgba(20,108,46,.07); border-radius: 2px; }

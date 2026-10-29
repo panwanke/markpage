@@ -215,6 +215,9 @@ export default function WorkspacePanel({
                     onClick={(event) => event.stopPropagation()}
                     onBlur={commitRename}
                     onKeyDown={(event) => {
+                      // 输入法组合期间的回车属于候选词上屏，不能当作提交 —— 否则名字只上屏一半，
+                      // 失焦时 commitRename 还会再提交一次。
+                      if (event.nativeEvent.isComposing) return
                       if (event.key === 'Enter') {
                         event.preventDefault()
                         commitRename()

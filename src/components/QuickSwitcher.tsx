@@ -74,6 +74,9 @@ export default function QuickSwitcher({ notes, initialQuery = '', onSelect, onCl
             aria-label={t('quickSwitch.placeholder')}
             onChange={(event) => { setQuery(event.target.value); setActive(0) }}
             onKeyDown={(event) => {
+              // 输入法组合期间的按键属于选候选词：回车是上屏、方向键是翻候选，
+              // 都不能当成「打开笔记」。用 nativeEvent —— React 合成事件不暴露 isComposing。
+              if (event.nativeEvent.isComposing) return
               if (event.key === 'ArrowDown') {
                 event.preventDefault()
                 setActive((index) => (results.length ? (index + 1) % results.length : 0))

@@ -1,7 +1,7 @@
 import { EMPTY_MARKDOWN, SAMPLE_MARKDOWN } from '../data/sample'
 import { detectLocale } from '../i18n/detect'
 import { LOCALES, normalizeLocale, t } from '../i18n'
-import { CUSTOM_EXPORT_DEFAULT } from './export'
+import { CUSTOM_EXPORT_DEFAULT } from '@markpage/core/export'
 import { clampUiScale } from './fonts'
 import { createDefaultLayout, normalizeLayout } from './layout'
 import { getPageConfig, UNTITLED_TITLE } from './markdown'
@@ -119,7 +119,7 @@ export function loadDocuments() {
     const saved = localStorage.getItem(DOCUMENTS_KEY)
     if (saved) {
       const docs = JSON.parse(saved) as Array<Record<string, unknown>>
-      if (Array.isArray(docs) && docs.length) {
+      if (Array.isArray(docs)) {
         return docs.map((raw) => {
           // 旧版本只记 localPath：内容留在浏览器里，但不升级成可自动写盘的绑定 ——
           // 那个路径属于哪个根目录已经无法确认，静默写回可能串到别的工作空间。

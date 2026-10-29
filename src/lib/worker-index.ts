@@ -9,7 +9,7 @@
  */
 
 import type { LocalFileEntry } from './localfs'
-import type { LinkIndex } from './links'
+import type { LinkIndex } from '@markpage/extension-obsidian/links'
 import type { IndexJobMessage, IndexJobRequest } from './vault-job'
 
 export interface WorkerIndexJob {

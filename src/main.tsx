@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import '@markpage/editor/styles.css'
 import App from './App.tsx'
 import { setLocale, t } from './i18n'
 import { loadSettings } from './lib/storage'

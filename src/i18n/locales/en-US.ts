@@ -13,6 +13,9 @@ export const enUS: Messages = {
   'document.untitled': 'Untitled document',
   'document.titleLabel': 'Document title',
 
+  'workspace.noOpenDocuments': 'No open documents',
+  'workspace.emptyHint': 'Create or import Markdown, or reopen a closed document from the sidebar.',
+
   'save.saved': 'Saved locally',
   'save.saving': 'Saving',
   'save.error': 'Local storage is full',
@@ -467,6 +470,7 @@ export const enUS: Messages = {
   'toast.documentDeleted': 'Deleted “{name}”',
   'toast.documentDuplicated': 'Duplicated as “{name}”',
   'toast.documentRenamed': 'Renamed to “{name}”',
+  'toast.storageFull': 'Local storage is full; changes live in memory only — export to keep them',
 
   'menu.vault': 'Vault',
   'cmd.quickSwitch': 'Quick switch…',

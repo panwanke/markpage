@@ -1,6 +1,6 @@
 import { Bold, CheckCheck, Code2, Eraser, FileDiff, Highlighter, MessageSquarePlus, Minus, PenLine, Strikethrough, Undo2 } from 'lucide-react'
 import { useI18n } from '../i18n'
-import { HIGHLIGHT_COLORS, TEXT_COLORS } from '../lib/palette'
+import { HIGHLIGHT_COLORS, TEXT_COLORS } from '@markpage/core/palette'
 import type { InlineFormat } from '../types'
 
 export interface RevisionControls {

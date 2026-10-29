@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { moveTab, reorderOpenDocuments, shiftTab, tabMoveStep } from './tabs'
-import { COALESCE_MS, createHistory, pushHistory, redoHistory, undoHistory } from './history'
+import { COALESCE_MS, createHistory, pushHistory, redoHistory, undoHistory } from '@markpage/core/history'
 
 const doc = (id: string, open = true) => ({ id, open, name: id })
 

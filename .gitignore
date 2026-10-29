@@ -39,3 +39,6 @@ trace/
 logic/
 docs/
 AGENTS.md
+
+# Local acceptance logs and synthetic test vaults
+validation-results/

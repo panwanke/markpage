@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Check, Copy, Download, RotateCcw, SlidersHorizontal, X } from 'lucide-react'
 import { useI18n } from '../i18n'
 import type { MessageKey } from '../i18n'
-import { buildExport, collectHighlightColors, collectTextColors, CUSTOM_EXPORT_DEFAULT, isDirectExport } from '../lib/export'
+import { buildExport, collectHighlightColors, collectTextColors, CUSTOM_EXPORT_DEFAULT, isDirectExport } from '@markpage/core/export'
 import { useEscape } from '../lib/useEscape'
 import type { ExportColorMapping, ExportConfig, ExportElementRule } from '../types'
 

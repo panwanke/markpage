@@ -6,7 +6,7 @@ import {
   pushHistory,
   redoHistory,
   undoHistory,
-} from './history'
+} from '@markpage/core/history'
 
 describe('撤销栈', () => {
   it('新起一份是空的', () => {

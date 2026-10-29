@@ -228,59 +228,54 @@ Chromium 还能在 drop 时取回真实句柄（`getAsFileSystemHandle()`），�
 | Markdown 管线 | unified（remark-parse → remark-gfm / math / frontmatter → remark-rehype → rehype-raw / slug / katex / highlight） |
 | 公式与代码 | KaTeX、lowlight / highlight.js（仅注册常用语言） |
 | 样式 | 原生 CSS + CSS 变量（`--ui-scale` / `--ui-width` / `--doc-font`），无 UI 框架 |
-| 测试 | Vitest（439 个用例 / 31 个文件，覆盖渲染管线、修订、导出、i18n、快捷键、标签、存储、库索引与工作空间写盘队列） |
+| 测试 | Vitest（485 个用例 / 39 个文件，覆盖渲染管线、修订、导出、i18n、快捷键、标签、存储、库索引、工作空间写盘队列、共享包边界与诊断保护） |
 | 静态检查 | oxlint + `tsc -b` |
 
 运行时没有后端：文档、偏好与目录句柄分别存在 localStorage 与 IndexedDB，导出走浏览器下载。
 
 ## 源码结构
 
-```
+```text
+packages/
+  core/src/              解析、源码编辑算法、评论、历史与 DocumentSession
+  editor/src/            受控源码编辑器、选区工具及作用域样式
+  extension-obsidian/src/ 方言装配、链接/索引、callout、块 ID 与嵌入
 src/
-  lib/markdown.ts     渲染管线、源码位置映射、标注与评论的写回（含取消高亮 / 取消文字色）
-  lib/palette.ts      高亮与文字色色板、rgb → hex 归一化（工具栏与右键菜单共用）
-  lib/localfs.ts      本地文件夹：选目录、递归扫描、读写文件、权限与目录句柄持久化
-  lib/vault.ts        Obsidian 库：8 层扫描、`.obsidian/app.json`、IndexedDB 索引缓存、不完整检测
-  lib/vault-job.ts    建索引作业协议，主线程与 Worker 共用（不依赖 Worker 也能测）
-  lib/anchors.ts      标题 / 块 id 锚点查找，只在已渲染的纸张里找
-  lib/workspace-store.ts 最近工作空间与最近文件：规范化、去重、排序、20 条上限
-  lib/hash.ts         同步内容哈希，给磁盘基准做冲突判定
-  lib/disk.ts         基准指纹：冲突只看内容哈希，lastModified 仅用于显示
-  lib/revision.ts     修订：识别 ~删除~ / <ins>新增</ins>、公式与代码保护区、接受拒绝、
-                      源码编辑追踪（打字 / 退格 / 粘贴反推成修订标记）
-  lib/highlight.ts    精简版代码高亮插件（仅注册常用语言；新增语言须同步 vite.config.ts 的
-                      optimizeDeps.include —— 语言文件是 CJS，不预打包 dev 会白屏，有测试守护）
-  lib/export.ts       三档导出：标签映射、颜色映射、Frontmatter 裁剪
-  lib/fonts.ts        界面 / 正文字体栈与字号缩放边界
-  lib/storage.ts      本地文档与偏好存储
-  lib/layout.ts       侧边栏停靠布局：面板分组、搬动 / 关闭 / 重排与存储还原
-  lib/shortcuts.ts    命令表与键位：解析、格式化、冲突检测、录制期间暂停监听
-  lib/history.ts      撤销 / 重做栈（按文档各一份，连续输入合并）
-  lib/tabs.ts         标签重排：只改打开文档的次序，键盘移位
-  i18n/               语言注册表与翻译函数；locales/ 下是各语言词表
-  components/         文档视图、工具栏、评论面板、设置与对话框
-  components/MenuBar.tsx  顶部菜单栏（键位从 keymap 现算，支持方向键与 Esc）
-  components/TabStrip.tsx 标签栏：拖动排序与键盘移位
-  components/ShortcutSettings.tsx 快捷键录制面板（设置 → 快捷键）
-  components/SourceEditor.tsx  源码编辑器（修订拦截与光标恢复都在这里）
-  components/DockSidebar.tsx  可拖动的面板组（标签、投放区、宽度调节）
-  components/ContextMenu.tsx  通用右键菜单（定位、键盘导航、关闭时机、焦点归还）
-  components/SelectionMenu.tsx 正文右键菜单：改色与内联标注
-  components/DocumentMenu.tsx 文档右键菜单：工作区列表与标签栏共用同一份条目
-  components/WorkspaceDialog.tsx 最近工作空间与最近文件
-  components/ConflictDialog.tsx  磁盘与浏览器冲突：采用磁盘或另存副本
-  hooks/useWorkspace.ts    当前挂载的工作空间：库识别、扫描、权限、按文档的写盘队列与冲突，
-                           以及会如实报告失败的 flush
-  hooks/useBuiltinPlugins.ts 内置插件启停与注册表生命周期
-  lib/keys.ts         键盘唤出右键菜单的判定（Menu 键 / Shift+F10）
-  plugins/            插件 API 类型与注册表；apply.ts 在解析树副本上跑渲染器；
-                      obsidian-live-editing/ 是 CodeMirror 实时预览
-  data/examples.ts    示例库加载
+  App.tsx                网页外壳及共享会话订阅
+  lib/markdown.ts        网页装配共享解析器及可选 Obsidian 方言
+  lib/document-session.ts 浏览器文档/绑定适配，不建立第二写盘队列
+  lib/localfs.ts         浏览器句柄、权限与本地文件访问
+  lib/vault*.ts          Vault 扫描与索引作业
+  lib/workspace-store.ts 最近工作空间与文件持久化
+  lib/storage.ts         既有浏览器文档和设置
+  lib/shortcuts.ts        网页命令与快捷键策略
+  lib/layout.ts          停靠侧栏布局
+  i18n/                  网页语言注册表与词表
+  components/            排版/分页正文、工具栏、菜单、面板与对话框
+  hooks/useWorkspace.ts  唯一浏览器写盘队列、绑定和冲突管理
+  plugins/               现有 UI 注册表、渲染器与 CodeMirror Live Editing
+  data/                  示例库
+tools/
+  obsidian-probe/         合成库宿主诊断
+  validate-architecture.mjs 包依赖与迁移边界检查
 ```
+
+## 共享包与 Obsidian 宿主
+
+核心算法、解析器/编辑会话、源码编辑器及已有 Obsidian 方言/双链逻辑现已迁入三个
+[npm workspace 共享包](packages/README.md)，网页直接消费这些公共入口。
+完整排版编辑器和正式宿主仍待迁移；包边界用
+`npm run validate:architecture` 检查。
+
+正式 Obsidian 宿主仍处于 P0 兼容验证阶段。运行
+`npm run prepare:obsidian-probe` 可构建诊断插件并生成新的合成测试库，再由用户按
+[探针操作说明](tools/obsidian-probe/README.md) 自行打开和操作。命令不启动 Obsidian、
+不启用插件、不修改现有知识库。该探针独立于未来的 MarkPage 编辑器；
+正式保存实现前仍需取得原生编辑器关闭与落盘行为的真实宿主验证结果。
 
 ## 部署
 
-`npm run build` 产出 `dist/` 纯静态文件，由 `.github/workflows/deploy.yml` 在推送到 `main` 时自动构建并发布到 GitHub Pages，无需提交构建产物。`vite.config.ts` 的 `base: './'` 使用相对路径，因此同一份构建产物也能直接放到 Vercel、Netlify 或任意子路径下托管。
+`npm run build` 产出 `dist/` 纯静态文件，由 `.github/workflows/deploy.yml` 在推送到 `main` 时自动构建并发布到 GitHub Pages，无需提交构建产物；PR 只验证，不部署。`vite.config.ts` 的 `base: './'` 使用相对路径，因此同一份构建产物也能直接放到 Vercel、Netlify 或任意子路径下托管。
 
 同一次构建会并行发布到两个目标：GitHub Pages 与 Cloudflare Pages（`cloudflare` job 复用 `build` 的 `dist` 产物，凭证存于仓库 Secrets）。两份产物完全一致，互为镜像。
 

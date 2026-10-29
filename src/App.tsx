@@ -1,4 +1,7 @@
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { SetStateAction } from 'react'
+import type { DocumentSessionSnapshot } from '@markpage/core/session'
+import { WebDocumentSessions } from './lib/document-session'
 import {
   Check,
   ChevronLeft,
@@ -28,9 +31,9 @@ import TabStrip from './components/TabStrip'
 import CommentDialog from './components/CommentDialog'
 import RevisionDialog from './components/RevisionDialog'
 import RevisionPopover from './components/RevisionPopover'
-import SourceEditor from './components/SourceEditor'
-import type { SourceEditorHandle } from './components/SourceEditor'
-import { caretAfterEdit } from './lib/source-selection'
+import { SourceEditor } from '@markpage/editor'
+import type { SourceEditorHandle } from '@markpage/editor'
+import { caretAfterEdit } from '@markpage/editor/source-selection'
 import GitHubStar from './components/GitHubStar'
 import ExportMenu from './components/ExportMenu'
 import ExportDialog from './components/ExportDialog'
@@ -51,7 +54,7 @@ import {
   getMarkdownStats,
   getOutline,
   getPageConfig,
-  parseMarkdown,
+  getMarkdownParser,
   replyToComment,
   toggleCommentResolved,
   UNTITLED_TITLE,
@@ -67,9 +70,9 @@ import {
   rejectRevisions,
   resolveRevision,
   trackSourceEdit,
-} from './lib/revision'
-import type { RevisionAction, RevisionMark } from './lib/revision'
-import { buildExport, CLEAN_EXPORT } from './lib/export'
+} from '@markpage/core/revision'
+import type { RevisionAction, RevisionMark } from '@markpage/core/revision'
+import { buildExport, CLEAN_EXPORT } from '@markpage/core/export'
 import { DOC_FONTS, fontStack, UI_FONTS } from './lib/fonts'
 import { EXAMPLE_DOCUMENTS } from './data/examples'
 import {
@@ -97,7 +100,7 @@ import {
 import { MARKDOWN_EXTENSION } from './lib/localfs'
 import type { LocalFileEntry } from './lib/localfs'
 import { MARKDOWN_EXTENSION as OPENABLE_EXTENSION } from './lib/localfs'
-import { hashContent } from './lib/hash'
+import { hashContent } from '@markpage/core/hash'
 import { findAnchorElement } from './lib/anchors'
 import { useWorkspace } from './hooks/useWorkspace'
 import { useBuiltinPlugins } from './hooks/useBuiltinPlugins'
@@ -107,7 +110,7 @@ import QuickSwitcher from './components/QuickSwitcher'
 import LinksPanel from './components/panels/LinksPanel'
 import type { DocumentLinkContext } from './components/MarkdownDocument'
 import { createAssetResolver, type AssetResolver } from './lib/assets'
-import { createEmbedCache, type EmbedCache } from './lib/embeds'
+import { createEmbedCache, type EmbedCache } from '@markpage/extension-obsidian/embeds'
 import {
   buildVaultIndex,
   buildVaultTree,
@@ -127,7 +130,7 @@ import {
   wikilinkAt,
   type LinkIndex,
   type WikilinkTarget,
-} from './lib/links'
+} from '@markpage/extension-obsidian/links'
 import { startWorkerIndex, type WorkerIndexJob } from './lib/worker-index'
 import type { PluginEditorHandle } from './plugins/types'
 import { useI18n } from './i18n'
@@ -136,15 +139,15 @@ import {
   COMMANDS,
   MENU_GROUPS,
   bindingIndex,
+  SOURCE_COMMANDS,
   detectPlatform,
   commandForKeyEvent,
   formatBinding,
   isTextEntryTarget,
 } from './lib/shortcuts'
 import type { CommandId } from './lib/shortcuts'
-import { setFrontmatterKeys } from './lib/frontmatter'
-import { createHistory, pushHistory, redoHistory, undoHistory } from './lib/history'
-import type { DocumentHistory } from './lib/history'
+import { setFrontmatterKeys } from '@markpage/core/frontmatter'
+
 import { moveTab, reorderOpenDocuments, shiftTab } from './lib/tabs'
 import type {
   EditorMode,
@@ -158,9 +161,12 @@ import { isPluginEditorMode, pluginEditorMode } from './types'
 import { DISK_STATE_LABELS, makeBaseline } from './lib/disk'
 import './App.css'
 
+const subscribeToNoSession = () => () => {}
+const emptySessionSnapshot = () => null
+
 export default function App() {
   const { t, setLocale: changeLocale } = useI18n()
-  const [documents, setDocuments] = useState(loadDocuments)
+  const [documents, setDocumentState] = useState(loadDocuments)
   const [settings, setSettings] = useState(loadSettings)
   const [activeId, setActiveId] = useState('')
   const [selection, setSelection] = useState<SelectionSnapshot | null>(null)
@@ -183,20 +189,34 @@ export default function App() {
   /** 标签页右键菜单：与工作区列表共用同一份文档菜单，只是触发位置不同。 */
   const [tabMenu, setTabMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
-  /** 每篇文档各持一份撤销栈，只在内存里；刷新页面即视为新会话。 */
-  const historyRef = useRef(new Map<string, DocumentHistory>())
+  /** Each document owns one in-memory editing/history controller. */
+  const documentSessionsRef = useRef(new WebDocumentSessions())
   const fileInputRef = useRef<HTMLInputElement>(null)
   const floatingToolbarRef = useRef<HTMLDivElement>(null)
   const splitDragRef = useRef<{ x: number; ratio: number; width: number } | null>(null)
+  /** 存储写满只提示一次：之后每次编辑都会重试失败，反复弹 toast 只会盖住正文。 */
+  const storageWarnedRef = useRef(false)
   /** 拖放监听只挂一次，异步里要拿最新的文档列表，闭包里的那份会过期。 */
   const documentsRef = useRef(documents)
-  useEffect(() => { documentsRef.current = documents }, [documents])
+  const setDocuments = useCallback((update: SetStateAction<MarkdownDoc[]>) => {
+    const next = typeof update === 'function' ? update(documentsRef.current) : update
+    documentsRef.current = next
+    documentSessionsRef.current.synchronize(next)
+    setDocumentState(next)
+  }, [])
+  useEffect(() => () => documentSessionsRef.current.dispose(), [])
   /** dragenter / dragleave 会在子元素之间反复触发，用计数抵消掉闪烁。 */
   const dragDepthRef = useRef(0)
 
   const openDocuments = documents.filter((document) => document.open)
   const activeDocument = documents.find((document) => document.id === activeId && document.open) ?? openDocuments[0]
-  const markdown = activeDocument?.markdown ?? ''
+  const activeSession = activeDocument ? documentSessionsRef.current.activate(activeDocument) : null
+  const activeSnapshot = useSyncExternalStore<DocumentSessionSnapshot | null>(
+    activeSession?.subscribe ?? subscribeToNoSession,
+    activeSession?.getSnapshot ?? emptySessionSnapshot,
+    activeSession?.getSnapshot ?? emptySessionSnapshot,
+  )
+  const markdown = activeSnapshot?.markdown ?? activeDocument?.markdown ?? ''
   const rawConfig = useMemo(() => getPageConfig(markdown), [markdown])
   // 「未命名」只存在于显示层：文档名留空即未命名，标题按当前语言现算，
   // 这样切换语言时标签页、标题框与页面页眉三处始终一致。
@@ -210,7 +230,9 @@ export default function App() {
       : rawConfig),
     [rawConfig, t],
   )
-  const tree = useMemo(() => parseMarkdown(markdown), [markdown])
+  const tree = useMemo(() => activeSession
+    ? activeSession.parse(getMarkdownParser(settings.obsidianSyntax))
+    : getMarkdownParser(settings.obsidianSyntax).parse(markdown), [activeSession, markdown, settings.obsidianSyntax])
   const outline = useMemo(() => getOutline(tree), [tree])
   const threads = useMemo(() => getCommentThreads(markdown, t('comments.missingAnchor')), [markdown, t])
   const stats = useMemo(() => getMarkdownStats(markdown), [markdown])
@@ -232,6 +254,10 @@ export default function App() {
   useEffect(() => {
     setSelection(null)
     setSelectionOrigin('rendered')
+    setSelectionMenu(null)
+    setActiveCommentId(null)
+    setRevisionPopover(null)
+    setModal((current) => current === 'comment' || current === 'revision' || current === 'export' ? null : current)
   }, [activeDocument?.id])
 
   /** 外部改写后把 caret 还回来源编辑器：源码栏、插件编辑器，或排版视图（不用管）。 */
@@ -245,23 +271,43 @@ export default function App() {
     if (activeDocument && activeId !== activeDocument.id) setActiveId(activeDocument.id)
   }, [activeDocument, activeId])
 
+  const notify = useCallback((message: string) => {
+    setToast(message)
+    window.setTimeout(() => setToast(''), 2200)
+  }, [])
+
   useEffect(() => {
     setSaveState('saving')
     const timer = window.setTimeout(() => {
       try {
         saveDocuments(documents)
         setSaveState('saved')
+        // 腾出空间后又能写进去了：让下一次写满可以再提示一次。
+        storageWarnedRef.current = false
       } catch {
         setSaveState('error')
+        // 写不进去意味着之后的改动只活在内存里，刷新就没了 —— 必须明确说一次。
+        if (!storageWarnedRef.current) {
+          storageWarnedRef.current = true
+          notify(t('toast.storageFull'))
+        }
       }
     }, 500)
     return () => window.clearTimeout(timer)
-  }, [documents])
+  }, [documents, notify, t])
 
   useEffect(() => {
     changeLocale(settings.locale)
-    saveSettings(settings)
-  }, [settings, changeLocale])
+    // 写失败也不能让 effect 抛错：这里没有 ErrorBoundary，一抛就是整棵树卸载（白屏）。
+    try {
+      saveSettings(settings)
+    } catch {
+      if (!storageWarnedRef.current) {
+        storageWarnedRef.current = true
+        notify(t('toast.storageFull'))
+      }
+    }
+  }, [settings, changeLocale, notify, t])
 
   useEffect(() => {
     document.title = activeDocument ? `${displayName(activeDocument)} · ${t('brand.name')}` : t('brand.name')
@@ -302,11 +348,6 @@ export default function App() {
     return () => window.removeEventListener('markpage:focus-mode', toggleFocus)
   }, [])
 
-  const notify = useCallback((message: string) => {
-    setToast(message)
-    window.setTimeout(() => setToast(''), 2200)
-  }, [])
-
   /**
    * 工作空间会话：目录句柄、权限、写盘队列与冲突判定都在这里。
    * App 仍然是文档真相的持有者，hook 只回写 binding / diskBaseline。
@@ -318,7 +359,7 @@ export default function App() {
     ))),
     replaceMarkdown: (id, markdown) => {
       // 整篇被磁盘版本替换，旧的撤销栈不再有意义。
-      historyRef.current.delete(id)
+      documentSessionsRef.current.forget(id)
       setDocuments((current) => current.map((document) => (
         document.id === id ? { ...document, markdown, updatedAt: new Date().toISOString() } : document
       )))
@@ -731,17 +772,21 @@ export default function App() {
    */
   const writeActiveMarkdown = useCallback((nextMarkdown: string, options: { name?: string; history?: boolean } = {}) => {
     const id = activeDocument?.id
-    if (!id) return
-    if (options.history !== false && nextMarkdown !== markdown) {
-      historyRef.current.set(id, pushHistory(historyRef.current.get(id) ?? createHistory(), markdown, Date.now()))
+    const document = documentsRef.current.find((item) => item.id === id)
+    if (!document) return
+    if (options.history !== false) {
+      const session = documentSessionsRef.current.get(document)
+      const result = session.commit({ documentId: document.id, expectedRevision: session.getSnapshot().revision, markdown: nextMarkdown, source: 'input' })
+      if (result.status === 'rejected') return
+      nextMarkdown = result.snapshot.markdown
     }
-    setDocuments((current) => current.map((document) => document.id === id ? {
-      ...document,
+    setDocuments((current) => current.map((item) => item.id === id ? {
+      ...item,
       markdown: nextMarkdown,
-      name: options.name ?? document.name,
+      name: options.name ?? item.name,
       updatedAt: new Date().toISOString(),
-    } : document))
-  }, [activeDocument?.id, markdown])
+    } : item))
+  }, [activeDocument?.id, setDocuments])
 
   const updateActiveDocument = useCallback((nextMarkdown: string, name?: string) => {
     writeActiveMarkdown(nextMarkdown, { name })
@@ -753,22 +798,20 @@ export default function App() {
    */
   const commitPluginEdit = useCallback((next: string, caret: number, trackRevision: boolean) => {
     const id = activeDocument?.id
-    if (!id) return { markdown, caret }
-    let result = next
-    let nextCaret = caret
-    if (trackRevision && settings.revisionMode && next !== markdown) {
-      const edit = trackSourceEdit(markdown, next, caret)
-      result = edit.markdown
-      nextCaret = edit.caret
+    const document = documentsRef.current.find((item) => item.id === id)
+    if (!document) return { markdown, caret }
+    const session = documentSessionsRef.current.get(document)
+    const result = session.commit({
+      documentId: document.id, expectedRevision: session.getSnapshot().revision,
+      markdown: next, caret, source: 'plugin', trackRevision: trackRevision && settings.revisionMode,
+    })
+    if (result.status === 'rejected') return { markdown: session.getSnapshot().markdown, caret }
+    if (result.status === 'applied') {
+      setDocuments((current) => current.map((item) => item.id === id
+        ? { ...item, markdown: result.snapshot.markdown, updatedAt: new Date().toISOString() } : item))
     }
-    if (result !== markdown) {
-      historyRef.current.set(id, pushHistory(historyRef.current.get(id) ?? createHistory(), markdown, Date.now()))
-      setDocuments((current) => current.map((document) => (
-        document.id === id ? { ...document, markdown: result, updatedAt: new Date().toISOString() } : document
-      )))
-    }
-    return { markdown: result, caret: nextCaret }
-  }, [activeDocument?.id, markdown, settings.revisionMode])
+    return { markdown: result.snapshot.markdown, caret: result.caret ?? caret }
+  }, [activeDocument?.id, markdown, settings.revisionMode, setDocuments])
 
   /** 插件里的选区：来源标成 extension，外部改写后由插件句柄恢复 caret。 */
   const handlePluginSelection = useCallback((next: SelectionSnapshot | null) => {
@@ -784,14 +827,15 @@ export default function App() {
   function undoDocument() {
     const id = activeDocument?.id
     if (!id) return
-    const step = undoHistory(historyRef.current.get(id) ?? createHistory(), markdown)
-    if (!step) {
+    const document = documentsRef.current.find((item) => item.id === id)
+    if (!document) return
+    const result = documentSessionsRef.current.get(document).undo()
+    if (result.status !== 'applied') {
       notify(t('toast.nothingToUndo'))
       return
     }
-    historyRef.current.set(id, step.history)
-    writeActiveMarkdown(step.markdown, { history: false })
-    restoreEditorCaret(step.markdown)
+    writeActiveMarkdown(result.snapshot.markdown, { history: false })
+    restoreEditorCaret(result.snapshot.markdown)
     setSelection(null)
     setSelectionMenu(null)
     window.getSelection()?.removeAllRanges()
@@ -801,14 +845,15 @@ export default function App() {
   function redoDocument() {
     const id = activeDocument?.id
     if (!id) return
-    const step = redoHistory(historyRef.current.get(id) ?? createHistory(), markdown)
-    if (!step) {
+    const document = documentsRef.current.find((item) => item.id === id)
+    if (!document) return
+    const result = documentSessionsRef.current.get(document).redo()
+    if (result.status !== 'applied') {
       notify(t('toast.nothingToRedo'))
       return
     }
-    historyRef.current.set(id, step.history)
-    writeActiveMarkdown(step.markdown, { history: false })
-    restoreEditorCaret(step.markdown)
+    writeActiveMarkdown(result.snapshot.markdown, { history: false })
+    restoreEditorCaret(result.snapshot.markdown)
     setSelection(null)
     setSelectionMenu(null)
     window.getSelection()?.removeAllRanges()
@@ -1022,14 +1067,9 @@ export default function App() {
   }
 
   function closeDocument(id: string) {
-    const remaining = openDocuments.filter((document) => document.id !== id)
-    if (!remaining.length) {
-      const document = createDocument()
-      setDocuments((current) => [...current.map((item) => item.id === id ? { ...item, open: false } : item), document])
-      setActiveId(document.id)
-    } else {
-      setDocuments((current) => current.map((document) => document.id === id ? { ...document, open: false } : document))
-      if (activeDocument?.id === id) setActiveId(remaining[0].id)
+    setDocuments((current) => current.map((document) => document.id === id ? { ...document, open: false } : document))
+    if (activeDocument?.id === id) {
+      setActiveId(documentsRef.current.find((document) => document.open)?.id ?? '')
     }
   }
 
@@ -1039,20 +1079,13 @@ export default function App() {
     if (!target) return
     const name = displayName(target)
     if (!window.confirm(t('workspace.deleteConfirm', { name }))) return
-    historyRef.current.delete(id)
+    documentSessionsRef.current.forget(id)
     // 先释放再移除：releaseDocument 还要靠文档里的绑定去删外部文件句柄，
     // 同时把写盘队列、冲突与磁盘状态一并清掉（否则关标签会一直误报未保存）。
     workspace.releaseDocument(id)
-    const remaining = documents.filter((document) => document.id !== id)
-    if (!remaining.length) {
-      const fallback = createDocument()
-      setDocuments([fallback])
-      setActiveId(fallback.id)
-    } else {
-      setDocuments(remaining)
-      if (activeDocument?.id === id) {
-        setActiveId((remaining.find((document) => document.open) ?? remaining[0]).id)
-      }
+    setDocuments((current) => current.filter((document) => document.id !== id))
+    if (activeDocument?.id === id) {
+      setActiveId(documentsRef.current.find((document) => document.open)?.id ?? '')
     }
     setSelection(null)
     setSelectionMenu(null)
@@ -1080,11 +1113,15 @@ export default function App() {
 
   /** 重命名同步写进 Frontmatter 标题，标签页、工作区与页眉始终一致。 */
   function renameDocument(id: string, name: string) {
-    setDocuments((current) => current.map((document) => {
-      if (document.id !== id) return document
-      const nextMarkdown = document.name === name ? document.markdown : updatePageConfig(document.markdown, { title: name })
-      return { ...document, name, markdown: nextMarkdown, updatedAt: new Date().toISOString() }
-    }))
+    const document = documentsRef.current.find((item) => item.id === id)
+    if (!document) return
+    const session = documentSessionsRef.current.get(document)
+    const current = session.getSnapshot()
+    const nextMarkdown = document.name === name ? current.markdown : updatePageConfig(current.markdown, { title: name })
+    const result = session.commit({ documentId: id, expectedRevision: current.revision, markdown: nextMarkdown, source: 'format' })
+    if (result.status === 'rejected') return
+    setDocuments((documents) => documents.map((item) => item.id === id
+      ? { ...item, name, markdown: result.snapshot.markdown, updatedAt: new Date().toISOString() } : item))
     notify(t('toast.documentRenamed', { name: name || t('document.untitled') }))
   }
 
@@ -1123,7 +1160,7 @@ export default function App() {
     const file = await workspace.readBoundFile(target)
     if (!file) return
     const baseline = makeBaseline(file.content, file.lastModified)
-    historyRef.current.delete(id)
+    documentSessionsRef.current.forget(id)
     setDocuments((current) => current.map((document) => (
       document.id === id
         ? { ...document, markdown: file.content, diskBaseline: baseline, updatedAt: new Date().toISOString() }
@@ -1160,7 +1197,7 @@ export default function App() {
     setSelectionMenu(null)
     notify(t('toast.imported', { count: imported.length }))
     if (fileInputRef.current) fileInputRef.current.value = ''
-  }, [notify, t])
+  }, [notify, t, setDocuments])
 
   // 整窗口拖放：把 .md 从资源管理器拽进来就打开，不用先点「导入」再选文件。
   useEffect(() => {
@@ -1248,7 +1285,7 @@ export default function App() {
       const existing = await findExternalDocument(entry.handle, path)
       if (existing) {
         // 之前拖过同一个文件：以磁盘上的内容为准，旧的撤销栈不再有意义。
-        historyRef.current.delete(existing.id)
+        documentSessionsRef.current.forget(existing.id)
         setDocuments((current) => current.map((document) => document.id === existing.id
           ? { ...document, markdown: content, open: true, diskBaseline: baseline, updatedAt: new Date().toISOString() }
           : document))
@@ -1309,15 +1346,11 @@ export default function App() {
     if (workspace.session?.id === workspaceId) return
     const ok = await workspace.switchWorkspace(workspaceId)
     if (!ok) return
-    setDocuments((current) => {
-      const next = current.map((document) => (
-        document.binding?.kind === 'workspace' && document.binding.workspaceId !== workspaceId
-          ? { ...document, open: false }
-          : document
-      ))
-      // 一篇都不剩就补一篇空白，避免整个编辑区空掉。
-      return next.some((document) => document.open) ? next : [...next, createDocument()]
-    })
+    setDocuments((current) => current.map((document) => (
+      document.binding?.kind === 'workspace' && document.binding.workspaceId !== workspaceId
+        ? { ...document, open: false }
+        : document
+    )))
     setSelection(null)
     setSelectionMenu(null)
   }
@@ -1355,7 +1388,7 @@ export default function App() {
     const baseline = makeBaseline(file.content, file.lastModified)
     if (existing) {
       // 之前开过后来关掉了：以磁盘上的最新内容为准，旧的撤销栈不再有意义。
-      historyRef.current.delete(existing.id)
+      documentSessionsRef.current.forget(existing.id)
       setDocuments((current) => current.map((document) => document.id === existing.id
         ? { ...document, markdown: file.content, open: true, diskBaseline: baseline, updatedAt: new Date().toISOString() }
         : document))
@@ -1491,13 +1524,14 @@ export default function App() {
         return revisions.total > 0
       case 'tabs.prev':
       case 'tabs.next':
-      case 'tabs.close':
         return openDocuments.length > 1
+      case 'tabs.close':
       case 'edit.undo':
       case 'edit.redo':
       case 'file.exportDirect':
       case 'file.exportClean':
       case 'file.exportCustom':
+      case 'file.print':
         return Boolean(activeDocument)
       case 'file.disconnectFolder':
         return Boolean(workspace.session)
@@ -1712,8 +1746,6 @@ export default function App() {
     },
   ]
 
-  if (!activeDocument) return null
-
   return (
     <div className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
       <header className="app-header">
@@ -1724,8 +1756,9 @@ export default function App() {
         <MenuBar menus={menus} label={t('menu.label')} />
         <div className="document-identity">
           <input
-            value={activeDocument.name}
-            placeholder={t('document.untitled')}
+            value={activeDocument?.name ?? ''}
+            disabled={!activeDocument}
+            placeholder={t(activeDocument ? 'document.untitled' : 'workspace.noOpenDocuments')}
             aria-label={t('document.titleLabel')}
             onChange={(event) => updateActiveDocument(updatePageConfig(markdown, { title: event.target.value }), event.target.value)}
           />
@@ -1734,7 +1767,7 @@ export default function App() {
             {saveState === 'saved' ? t('save.saved') : saveState === 'saving' ? t('save.saving') : t('save.error')}
           </span>
           {/* 缓存已保存 ≠ 已写进磁盘：绑定文档单独显示磁盘状态。 */}
-          {activeDocument.binding && activeDiskState && (
+          {activeDocument?.binding && activeDiskState && (
             <span className={`disk-state is-${activeDiskState}`} title={activeDocument.binding.path}>
               {t(DISK_STATE_LABELS[activeDiskState])}
             </span>
@@ -1744,6 +1777,7 @@ export default function App() {
           <input ref={fileInputRef} type="file" accept=".md,.markdown,.mdown,.mkd,.txt" multiple hidden onChange={(event) => importFiles(event.target.files)} />
           <button className="header-button" onClick={() => fileInputRef.current?.click()}><Import size={16} /><span>{t('header.import')}</span></button>
           <ExportMenu
+            disabled={!activeDocument}
             shortcuts={{
               direct: shortcutLabel('file.exportDirect'),
               clean: shortcutLabel('file.exportClean'),
@@ -1753,7 +1787,7 @@ export default function App() {
             onClean={handleExportClean}
             onCustom={() => setModal('export')}
           />
-          <button className="icon-button" title={t('header.print')} onClick={() => window.print()}><Printer size={18} /></button>
+          <button className="icon-button" title={t('header.print')} disabled={!activeDocument} onClick={() => window.print()}><Printer size={18} /></button>
           <span className="header-divider" />
           <GitHubStar />
           <button className="icon-button" title={t('header.settings')} onClick={() => { setSettingsTab('general'); setModal('settings') }}><Settings2 size={19} /></button>
@@ -1763,7 +1797,7 @@ export default function App() {
 
       <TabStrip
         tabs={openDocuments.map((document) => ({ id: document.id, label: displayName(document) }))}
-        activeId={activeDocument.id}
+        activeId={activeDocument?.id ?? ''}
         onSelect={openDocument}
         onClose={closeDocument}
         onNew={newDocument}
@@ -1794,6 +1828,7 @@ export default function App() {
         )}
 
         <main className="editor-area">
+          {activeDocument ? <>
           <div className="editor-toolbar">
             <div className="mode-switch">
               <button className={mode === 'rendered' ? 'active' : ''} onClick={() => switchMode('rendered')} title={t('editor.renderedHint')}><ScrollText size={15} />{t('editor.rendered')}</button>
@@ -1833,6 +1868,7 @@ export default function App() {
                 <MarkdownDocument
                   markdown={markdown}
                   documentId={activeDocument.id}
+                  parsedTree={tree}
                   pluginRenderers={pluginRenderers}
                   config={config}
                   viewMode={mode === 'split' ? 'continuous' : settings.viewMode}
@@ -1895,7 +1931,10 @@ export default function App() {
                 <SourceEditor
                   key={activeDocument.id}
                   ref={sourceEditorRef}
-                  keymap={keymap}
+                  commandForEvent={(event) => {
+                    const id = commandForKeyEvent(event, keyIndex)
+                    return id && SOURCE_COMMANDS.has(id) ? id : null
+                  }}
                   onSelection={handleSourceSelection}
                   onCommand={(id, target) => {
                     if (!commandEnabled(id, target)) return false
@@ -1918,7 +1957,7 @@ export default function App() {
           <footer className="status-bar">
             <div>
               <span className="status-save-dot" />
-              <span>{saveState === 'saved' ? t('status.saved') : t('status.syncing')}</span>
+              <span>{saveState === 'saved' ? t('status.saved') : saveState === 'saving' ? t('status.syncing') : t('save.error')}</span>
               <span className="status-divider">/</span>
               {activeDocument && activeVaultPath && diskChanged.includes(activeVaultPath) && (
                 <button
@@ -1955,9 +1994,20 @@ export default function App() {
               <span>{t('status.markdown')}</span>
             </div>
           </footer>
+          </> : (
+            <div className="empty-workspace">
+              <FileText size={40} aria-hidden="true" />
+              <h1>{t('workspace.noOpenDocuments')}</h1>
+              <p>{t('workspace.emptyHint')}</p>
+              <div className="empty-workspace-actions">
+                <button className="primary-button" onClick={newDocument}>{t('tabs.new')}</button>
+                <button className="secondary-button" onClick={() => fileInputRef.current?.click()}>{t('header.import')}</button>
+              </div>
+            </div>
+          )}
         </main>
 
-        {settings.showComments && !focusMode && <CommentsPanel
+        {activeDocument && settings.showComments && !focusMode && <CommentsPanel
           threads={threads}
           activeId={activeCommentId}
           userName={settings.userName}
@@ -2068,7 +2118,7 @@ export default function App() {
         onResetLayout={() => { updateSettings({ layout: createDefaultLayout() }); notify(t('toast.layoutReset')) }}
         onClose={() => setModal(null)}
       />}
-      {modal === 'export' && <ExportDialog
+      {modal === 'export' && activeDocument && <ExportDialog
         name={activeDocument.name}
         markdown={markdown}
         config={settings.exportConfig}

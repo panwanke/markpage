@@ -6,7 +6,7 @@
  * 找到 FileSystemFileHandle，再转成 blob URL 并缓存。切文档 / 断开目录时统一 revoke。
  */
 
-import { basenameOf, dirnameOf, joinVaultPath, normalizeVaultPath } from './links'
+import { basenameOf, dirnameOf, joinVaultPath, normalizeVaultPath } from '@markpage/extension-obsidian/links'
 
 export interface AssetResolverOptions {
   /** 路径 → 文件句柄（相对库根）。 */

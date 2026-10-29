@@ -61,6 +61,11 @@ describe('设置读取与迁移', () => {
 })
 
 describe('文档读取', () => {
+  it('preserves an intentionally empty document cache', () => {
+    localStorage.setItem(DOCUMENTS_KEY, '[]')
+    expect(loadDocuments()).toEqual([])
+  })
+
   it('旧数据里固化成译文的「未命名文档」被还原成空名', () => {
     localStorage.setItem(DOCUMENTS_KEY, JSON.stringify([
       { id: 'a', name: '未命名文档', markdown: '', createdAt: '', updatedAt: '', open: true },

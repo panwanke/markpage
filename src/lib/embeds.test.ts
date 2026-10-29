@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createEmbedCache } from './embeds'
+import { createEmbedCache } from '@markpage/extension-obsidian/embeds'
 
 /** 等所有微任务跑完：缓存里的读取是 Promise 链，没有定时器。 */
 async function flush() {

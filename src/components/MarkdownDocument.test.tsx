@@ -10,7 +10,7 @@ import type { DocumentLinkContext } from './MarkdownDocument'
 import { applyPluginRenderers } from '../plugins/apply'
 import { parseMarkdown } from '../lib/markdown'
 import { DEFAULT_PAGE_CONFIG } from '../lib/markdown'
-import type { ResolvedLink, WikilinkTarget } from '../lib/links'
+import type { ResolvedLink, WikilinkTarget } from '@markpage/extension-obsidian/links'
 import { setLocale } from '../i18n'
 
 let root: Root | undefined

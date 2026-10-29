@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hashContent } from './hash'
+import { hashContent } from '@markpage/core/hash'
 
 describe('内容指纹', () => {
   it('同样内容得到同样结果', () => {
