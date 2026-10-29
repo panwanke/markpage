@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Check, X } from 'lucide-react'
 import { useI18n } from '../i18n'
-import type { RevisionAction, RevisionMark } from '../lib/revision'
+import type { RevisionAction, RevisionMark } from '@markpage/core/revision'
 
 interface RevisionPopoverProps {
   mark: RevisionMark

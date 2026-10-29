@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { hashContent } from '../lib/hash'
+import { hashContent } from '@markpage/core/hash'
 import { makeBaseline } from '../lib/disk'
 import {
   createLocalFile,
@@ -86,6 +86,26 @@ interface UseWorkspaceOptions {
   t: Translate
 }
 
+/**
+ * 磁盘内容是否还停在基准版本上。返回 null 表示「没变」或者「读不出来」。
+ *
+ * 只在「浏览器内容正好等于基准」时才走（改完撤销、或重新载入），不是每次按键，
+ * 所以这里直接读全文比哈希，不用先拿 lastModified 挡一道——同步工具改完内容却保留
+ * 时间戳的情况并不少见，按时间判断会漏。
+ */
+async function readExternalVersion(
+  handle: FileSystemFileHandle,
+  baseline: DiskBaseline,
+): Promise<{ content: string; lastModified: number } | null> {
+  try {
+    const info = await readLocalFileWithInfo(handle)
+    return hashContent(info.content) === baseline.hash ? null : { content: info.content, lastModified: info.lastModified }
+  } catch {
+    // 读不动盘（文件被删 / 权限没了）时当作没变：写盘路径自己会报错。
+    return null
+  }
+}
+
 function conflictCopyPath(path: string) {
   const slash = path.lastIndexOf('/')
   const directory = slash >= 0 ? path.slice(0, slash + 1) : ''
@@ -126,6 +146,8 @@ export function useWorkspace(options: UseWorkspaceOptions) {
   const scheduleWriteRef = useRef<(id: string) => void>(() => undefined)
   /** 已经提示过写盘失败的文档：失败状态没解开之前不重复弹提示。 */
   const writeFailedRef = useRef(new Set<string>())
+  /** 每篇文档上次看到的内容哈希：用来区分「内容刚变」与「重复调用」。 */
+  const seenHashRef = useRef(new Map<string, string>())
 
   const applySession = useCallback((next: WorkspaceSession | null) => {
     sessionRef.current = next
@@ -214,8 +236,23 @@ export function useWorkspace(options: UseWorkspaceOptions) {
     const content = doc.markdown
     const hash = hashContent(content)
     const baseline = doc.diskBaseline
-    // 内容和基准一致：没有需要写的东西，别为了「确认」反复落盘。
+    // 内容和基准一致：确实没有东西要写。但磁盘可能已经被别的编辑器改过了，
+    // 直接按「已保存」收尾会同时丢掉外部改动和浏览器副本（关标签也不再拦），
+    // 所以这里必须先确认磁盘还停在基准版本上。
     if (baseline && baseline.hash === hash) {
+      const external = await readExternalVersion(handle, baseline)
+      if (external) {
+        setConflict({
+          documentId: id,
+          diskMarkdown: external.content,
+          diskLastModified: external.lastModified,
+          browserChanged: false,
+        }, id)
+        setDiskState(id, 'conflict')
+        reportSuccess()
+        notify(t('localfs.conflict', { name: doc.name || binding.path }))
+        return
+      }
       setDiskState(id, 'clean')
       reportSuccess()
       return
@@ -304,7 +341,13 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       setDiskState(doc.id, 'conflict')
       return
     }
-    if (doc.diskBaseline && doc.diskBaseline.hash === hashContent(doc.markdown)) return
+    // 每篇文档每次渲染都会被问一遍，「内容和基准一致」本来是免排队的快通道。
+    // 但「改完又撤销回基准」同样满足这个条件，而那恰好是磁盘可能已被外部改过、
+    // 最该去确认一次的时机，所以只有「内容和上次见到的一样」时才真的跳过。
+    const hash = hashContent(doc.markdown)
+    const seen = seenHashRef.current.get(doc.id)
+    seenHashRef.current.set(doc.id, hash)
+    if (doc.diskBaseline && doc.diskBaseline.hash === hash && seen === hash) return
     setDiskState(doc.id, 'pending')
     scheduleWrite(doc.id)
   }, [scheduleWrite, setDiskState])
@@ -646,6 +689,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       timersRef.current.delete(documentId)
     }
     writeFailedRef.current.delete(documentId)
+    seenHashRef.current.delete(documentId)
     setConflict(null, documentId)
     dropDiskState(documentId)
     const doc = optionsRef.current.getDocuments().find((item) => item.id === documentId)

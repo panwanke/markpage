@@ -6,7 +6,7 @@
  * （最短路径）→ 别名。解析不到就返回 null，交给界面显示「未解析链接」。
  */
 
-import { readFrontmatter } from './frontmatter'
+import { readFrontmatter } from '@markpage/core/frontmatter'
 
 export const ASSET_EXTENSION = /\.(png|jpe?g|gif|svg|webp|avif|bmp|pdf|mp3|mp4|webm|wav|ogg|m4a|flac)$/i
 

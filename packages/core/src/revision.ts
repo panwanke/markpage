@@ -52,11 +52,56 @@ const DELETE_MARK = /~([^\s~](?:[^~\n]*[^\s~])?)~/g
 /** 只删到标记符号本身（~ < > /）时不记修订，否则会写出 `~~` 这种自毁的源码。 */
 const MARKUP_ONLY = /^[~<>/\s]*$/
 
-function inRanges(ranges: SourceRange[], start: number, end: number) {
-  if (end <= start) {
-    return ranges.some((range) => start > range.start && start < range.end)
+/** 最后一个 `start <= value` 的下标，没有则 -1。 */
+function floorIndex(ranges: SourceRange[], value: number): number {
+  let low = 0
+  let high = ranges.length - 1
+  let found = -1
+  while (low <= high) {
+    const mid = (low + high) >> 1
+    if (ranges[mid].start <= value) {
+      found = mid
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
   }
-  return ranges.some((range) => start < range.end && end > range.start)
+  return found
+}
+
+/**
+ * 是否与任一区间相交。要求 `ranges` 已排序且互不重叠（见 `mergeRanges`）。
+ *
+ * 原先这里用 `ranges.some()` 线性扫，而调用方在循环里对每个标记调一次，
+ * 大文档（几千个公式 / 行内代码）下退化成 O(标记数 × 区间数)；改二分后是 O(log 区间数)。
+ */
+function inRanges(ranges: SourceRange[], start: number, end: number): boolean {
+  if (!ranges.length) return false
+  const at = floorIndex(ranges, start)
+  if (end <= start) {
+    // 光标点：只算落在区间内部，端点不算（光标贴着围栏边缘时仍可编辑）。
+    return at >= 0 && start > ranges[at].start && start < ranges[at].end
+  }
+  if (at >= 0 && start < ranges[at].end && end > ranges[at].start) return true
+  const next = at + 1
+  return next < ranges.length && start < ranges[next].end && end > ranges[next].start
+}
+
+/** 排序并合并重叠区间，得到 `inRanges` 二分所需的不重叠有序集合。 */
+function mergeRanges(ranges: SourceRange[]): SourceRange[] {
+  if (ranges.length < 2) return ranges
+  ranges.sort((a, b) => a.start - b.start || a.end - b.end)
+  const merged: SourceRange[] = [ranges[0]]
+  for (let index = 1; index < ranges.length; index += 1) {
+    const current = ranges[index]
+    const last = merged[merged.length - 1]
+    if (current.start <= last.end) {
+      if (current.end > last.end) merged[merged.length - 1] = { start: last.start, end: current.end }
+    } else {
+      merged.push(current)
+    }
+  }
+  return merged
 }
 
 /**
@@ -87,22 +132,21 @@ export function getProtectedRanges(markdown: string): SourceRange[] {
 
   for (const match of markdown.matchAll(INLINE_CODE)) {
     const start = match.index ?? 0
-    const end = start + match[0].length
-    if (!inRanges(ranges, start, end)) ranges.push({ start, end })
+    ranges.push({ start, end: start + match[0].length })
   }
   for (const match of markdown.matchAll(DISPLAY_MATH)) {
     const start = match.index ?? 0
-    const end = start + match[0].length
-    if (!inRanges(ranges, start, end)) ranges.push({ start, end })
+    ranges.push({ start, end: start + match[0].length })
   }
   for (const match of markdown.matchAll(INLINE_MATH)) {
     const start = match.index ?? 0
     const end = start + match[0].length
     // `$$` 已经在块级公式里处理过；`\$` 是转义的美元符号，不是公式起点。
     if (markdown[start - 1] === '\\' || markdown[start + 1] === '$') continue
-    if (!inRanges(ranges, start, end)) ranges.push({ start, end })
+    ranges.push({ start, end })
   }
-  return ranges.sort((a, b) => a.start - b.start)
+  // 先全量收集再去重，构建期就不必对每个候选做一次全表相交判断。
+  return mergeRanges(ranges)
 }
 
 /** 这段源码是否落在公式 / 代码 / Frontmatter 里（start === end 时判断光标点）。 */
@@ -110,9 +154,13 @@ export function isRevisionLocked(markdown: string, start: number, end = start) {
   return inRanges(getProtectedRanges(markdown), start, end)
 }
 
-/** 找出全文的修订标记，按源码顺序返回。 */
-export function findRevisions(markdown: string): RevisionMark[] {
-  const ranges = getProtectedRanges(markdown)
+/**
+ * 找出全文的修订标记，按源码顺序返回。
+ * 传入 `protectedRanges` 可复用已算好的结果——`trackSourceEdit` 一次编辑要查好几遍，
+ * 每次都重新扫全文档在大文件上是主要开销。
+ */
+export function findRevisions(markdown: string, protectedRanges?: SourceRange[]): RevisionMark[] {
+  const ranges = protectedRanges ?? getProtectedRanges(markdown)
   const marks: RevisionMark[] = []
 
   for (const match of markdown.matchAll(INSERT_MARK)) {
@@ -136,8 +184,8 @@ export function findRevisions(markdown: string): RevisionMark[] {
     if (inRanges(ranges, start, end)) continue
     // `~~删除线~~` 属于 GFM 语法，不是修订标记：前后紧贴波浪号的一律跳过。
     if (markdown[start - 1] === '~' || markdown[end] === '~') continue
-    // 已经套在 <ins> 里的波浪号同样不算。
-    if (marks.some((mark) => start < mark.end && end > mark.start)) continue
+    // 已经套在 <ins> 里的波浪号同样不算。此时 marks 全是新增标记，有序且不重叠，可二分。
+    if (inRanges(marks, start, end)) continue
     marks.push({
       kind: 'delete',
       start,
@@ -323,10 +371,11 @@ export function trackSourceEdit(previous: string, next: string, caretHint?: numb
   if (!removed.trim() && !added.trim()) return plain
   if (removed && MARKUP_ONLY.test(removed)) return plain
   if (added && /[\n<>~]/.test(added)) return plain
-  if (isRevisionLocked(previous, removedStart, removedEnd)) return plain
-  if (added && isRevisionLocked(next, prefix, prefix + added.length)) return plain
+  const previousRanges = getProtectedRanges(previous)
+  if (inRanges(previousRanges, removedStart, removedEnd)) return plain
+  if (added && inRanges(getProtectedRanges(next), prefix, prefix + added.length)) return plain
 
-  const marks = findRevisions(previous)
+  const marks = findRevisions(previous, previousRanges)
   const deletedOwner = marks.find((mark) => mark.kind === 'delete'
     && mark.innerStart <= removedStart && removedEnd <= mark.innerEnd)
   if (deletedOwner && added) {
@@ -372,7 +421,7 @@ export function trackSourceEdit(previous: string, next: string, caretHint?: numb
   }
 
   // 删到了标记符号本身：说明用户在手工改源码，交给用户。
-  if (marks.some((mark) => removedStart < mark.end && removedEnd > mark.start)) return plain
+  if (inRanges(marks, removedStart, removedEnd)) return plain
 
   if (!added) return wrapDeletion(previous, marks, removedStart, removedEnd)
 

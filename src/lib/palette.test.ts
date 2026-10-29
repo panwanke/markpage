@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_HIGHLIGHT, HIGHLIGHT_COLORS, TEXT_COLORS, isPaletteColor, toHexColor } from './palette'
+import { DEFAULT_HIGHLIGHT, HIGHLIGHT_COLORS, TEXT_COLORS, isPaletteColor, toHexColor } from '@markpage/core/palette'
 
 describe('色值归一化', () => {
   it.each([

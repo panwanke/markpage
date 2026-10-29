@@ -6,7 +6,7 @@
  * 只有 Chromium 内核（Chrome / Edge）支持，Safari 与 Firefox 走降级提示。
  */
 
-import { ASSET_EXTENSION } from './links'
+import { ASSET_EXTENSION } from '@markpage/extension-obsidian/links'
 
 /** 只收 Markdown 与纯文本，其余文件不进列表。 */
 export const MARKDOWN_EXTENSION = /\.(md|markdown|mdown|mkd|txt)$/i
@@ -175,8 +175,16 @@ export async function readLocalFileWithInfo(handle: FileSystemFileHandle): Promi
 
 export async function writeLocalFile(handle: FileSystemFileHandle, content: string) {
   const writable = await handle.createWritable()
-  await writable.write(content)
-  await writable.close()
+  try {
+    await writable.write(content)
+    await writable.close()
+  } catch (error) {
+    // 写失败（配额满 / 文件被外部删掉或改名 / 句柄失效）时必须 abort：
+    // 只 close 不 abort 会留下半截内容，而不关流则浏览器侧的写入锁一直不释放，
+    // 之后对这个句柄每次 createWritable() 都直接抛错，文件就再也存不进去了。
+    await writable.abort(error).catch(() => {})
+    throw error
+  }
 }
 
 /** 单个文件句柄的写权限：拖进来的文件不在任何已扫描的目录里，得单独确认一次。 */

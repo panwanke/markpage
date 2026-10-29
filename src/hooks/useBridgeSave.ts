@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { MarkdownDocument } from '../types'
 import type { BridgeSnapshot } from './useVaultBridge'
-import { hashContent } from '../lib/hash'
+import { hashContent } from '@markpage/core/hash'
 
 export type BridgeSaveState = 'clean' | 'pending' | 'writing' | 'readonly' | 'offline' | 'conflict' | 'busy' | 'error'
 

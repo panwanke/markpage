@@ -1,4 +1,4 @@
-import type { SelectionSnapshot } from '../types'
+import type { SelectionSnapshot } from '@markpage/core/model'
 
 type SourceSelectionTarget = Pick<HTMLTextAreaElement,
   'value' | 'selectionStart' | 'selectionEnd' | 'getBoundingClientRect'>

@@ -259,61 +259,55 @@ Documents under `examples/` are bundled into the app, loadable from the sidebar'
 | Markdown pipeline | unified (remark-parse → remark-gfm / math / frontmatter → remark-rehype → rehype-raw / slug / katex / highlight) |
 | Math and code | KaTeX, lowlight / highlight.js (common languages only) |
 | Styling | Plain CSS with custom properties (`--ui-scale`, `--ui-width`, `--doc-font`); no UI framework |
-| Testing | Vitest — 471 cases across 33 files: rendering pipeline, revisions, export, i18n, shortcuts, tabs, storage, the vault index and the workspace write queue |
+| Testing | Vitest — 552 cases across 42 files: rendering pipeline, revisions, export, i18n, shortcuts, tabs, storage, the vault index, the workspace write queue, shared package boundaries and diagnostic guards |
 | Static analysis | oxlint + `tsc -b` |
 
 There is no backend at runtime: documents and preferences live in localStorage, directory handles in IndexedDB, and export goes through the browser's download flow.
 
 ## Project structure
 
-```
+```text
+packages/
+  core/src/              parser, source/edit algorithms, comments, history and DocumentSession
+  editor/src/            controlled source editor, selection helpers and scoped source styles
+  extension-obsidian/src/ syntax contribution, link/index helpers, callouts, block IDs and embeds
 src/
-  lib/markdown.ts     render pipeline, source-position mapping, writing markup and comments back
-                      (including clearing highlights and text colour)
-  lib/palette.ts      highlight / text-colour swatches, rgb → hex normalisation (toolbar + right-click)
-  lib/localfs.ts      local folders: pick directory, recursive scan, read / write, permissions, handle persistence
-  lib/vault.ts        Obsidian vault: 8-level scan, `.obsidian/app.json`, IndexedDB index cache, partial detection
-  lib/vault-job.ts    index job protocol shared by the main thread and the Worker (testable without a Worker)
-  lib/anchors.ts      heading / block-id anchor lookup, scoped to the rendered pages
-  lib/workspace-store.ts  recent workspaces and recent files: normalise, dedupe, sort, 20-entry cap
-  lib/hash.ts         synchronous content hash for the disk baseline (conflict detection)
-  lib/disk.ts         baseline fingerprint: content hash decides conflicts, lastModified is display only
-  lib/revision.ts     revisions: recognise ~deletion~ / <ins>insertion</ins>, math and code guards,
-                      accept / reject, and inferring revision marks from typing, backspace and paste
-  lib/highlight.ts    trimmed code-highlight plugin (common languages only; a new language must also be
-                      added to optimizeDeps.include in vite.config.ts — the language files are CJS and
-                      dev-mode white-screens without pre-bundling, which a test guards)
-  lib/export.ts       three export modes: tag mapping, colour mapping, frontmatter trimming
-  lib/fonts.ts        UI and body font stacks, font-scale bounds
-  lib/storage.ts      local document and preference storage
-  lib/layout.ts       dock layout: panel groups, moving / closing / reordering, restore from storage
-  lib/shortcuts.ts    command table and keymap: parsing, formatting, conflict detection, paused listener
-  lib/history.ts      undo / redo stacks (one per document, consecutive input merged)
-  lib/tabs.ts         tab reordering: open documents only, keyboard moves
-  i18n/               language registry and translate function; locales/ holds the key tables
-  components/         document view, toolbar, comment panel, settings and dialogs
-  components/MenuBar.tsx          top menu bar (bindings computed from the keymap, arrow keys, Esc)
-  components/TabStrip.tsx         tab strip: drag ordering and keyboard moves
-  components/ShortcutSettings.tsx shortcut recorder (Settings → Shortcuts)
-  components/SourceEditor.tsx     source editor (revision interception and caret restoration)
-  components/DockSidebar.tsx      draggable panel groups (tabs, drop zones, width adjustment)
-  components/ContextMenu.tsx      generic context menu (placement, keyboard nav, close timing, focus return)
-  components/SelectionMenu.tsx    body right-click menu: colours and inline markup
-  components/DocumentMenu.tsx     document menu shared by workspace rows and the tab strip
-  components/WorkspaceDialog.tsx  recent workspaces and recent files
-  components/ConflictDialog.tsx   disk vs browser conflict: adopt disk or save a copy
-  hooks/useWorkspace.ts    mounted workspace session: vault detection, scan, permissions, per-document write
-                           queue, conflicts, and a flush that reports failure instead of assuming success
-  hooks/useBuiltinPlugins.ts  built-in plugin activation and registry lifecycle
-  lib/keys.ts         key detection for context menus (Menu key / Shift+F10)
-  plugins/            plugin API types and registry; apply.ts runs renderers on a copy of the tree;
-                      obsidian-live-editing/ is the CodeMirror live preview
-  data/examples.ts    example library loading
+  App.tsx                web shell and shared-session subscription
+  lib/markdown.ts        web assembly of the core parser and optional Obsidian dialect
+  lib/document-session.ts browser document/binding adapter; no second write queue
+  lib/localfs.ts         browser file handles, permissions and local file access
+  lib/vault*.ts          vault scanning and indexing jobs
+  lib/workspace-store.ts recent workspace/file persistence
+  lib/storage.ts         existing browser documents and settings
+  lib/shortcuts.ts        web command/keymap policy
+  lib/layout.ts          dock/sidebar layouts
+  i18n/                  web language registry and locales
+  components/            rendered/paged document, toolbar, menus, panels and dialogs
+  hooks/useWorkspace.ts  single browser disk-write queue, binding and conflict management
+  plugins/               existing UI registry, renderers and CodeMirror Live Editing
+  data/                  example library
+tools/
+  obsidian-probe/         synthetic-vault host diagnostics
+  validate-architecture.mjs package dependency and migration boundary gate
 ```
+
+## Shared packages and Obsidian host
+
+Shared core algorithms, the parser/editing sessions, the source editor and existing
+Obsidian dialect/link helpers now live in three [npm workspace packages](packages/README.md), consumed
+by the web app. The full rendered editor and production Obsidian host remain pending. Run `npm run validate:architecture` to check dependency boundaries.
+
+The production Obsidian host remains at its P0 compatibility gate. Run
+`npm run prepare:obsidian-probe` to build a diagnostic plugin and generate a fresh
+synthetic vault. Open and operate that vault yourself using the
+[probe instructions](tools/obsidian-probe/README.md). This command does not launch
+Obsidian, enable plugins, or change an existing vault. The diagnostic plugin is
+separate from the future MarkPage editor; native save/close behavior still needs
+user-operated real-host evidence before the production save implementation.
 
 ## Deployment
 
-`npm run build` emits a static `dist/`. `.github/workflows/deploy.yml` builds and publishes it to GitHub Pages on every push to `main`, so build output is never committed. `base: './'` in `vite.config.ts` keeps paths relative, so the same build also works on Vercel, Netlify or any sub-path.
+`npm run build` emits a static `dist/`. `.github/workflows/deploy.yml` builds and publishes it to GitHub Pages on every push to `main`, so build output is never committed. Pull requests run validation without deployment. `base: './'` in `vite.config.ts` keeps paths relative, so the same build also works on Vercel, Netlify or any sub-path.
 
 A single build publishes to two targets in parallel: GitHub Pages and Cloudflare Pages (the `cloudflare` job reuses the `dist` artifact from `build`; credentials live in repository secrets). Both artifacts are identical and mirror each other.
 

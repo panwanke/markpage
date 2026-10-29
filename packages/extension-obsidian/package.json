@@ -1,0 +1,17 @@
+{
+  "name": "@markpage/extension-obsidian",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./links": "./src/links.ts",
+    "./syntax": "./src/obsidian-syntax.ts",
+    "./callouts": "./src/callouts.ts",
+    "./embeds": "./src/embeds.ts"
+  },
+  "dependencies": {
+    "@markpage/core": "1.1.0",
+    "unist-util-visit": "5.2.0"
+  }
+}

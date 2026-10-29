@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { VaultBridgeClient, decodeBridgeIndex } from './vault-bridge'
 import { buildVaultIndex, unresolvedLinks } from './vault'
-import { resolveWikilink } from './links'
+import { resolveWikilink } from '@markpage/extension-obsidian/links'
 import { fakeBridge, fakeObsidian, deriveIndex, startBridge } from '../test/fake-bridge'
 
 const cleanup: (() => Promise<void>)[] = []

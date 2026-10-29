@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -10,6 +10,7 @@ import { DEFAULT_KEYMAP } from './lib/shortcuts'
 import type { Keymap } from './lib/shortcuts'
 import { focusModePlugin } from './plugins/builtin'
 import { setLocale, t } from './i18n'
+import { getMarkdownParser } from './lib/markdown'
 
 let root: Root | undefined
 let host: HTMLDivElement
@@ -38,7 +39,7 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-async function mount(markdown = 'one two', options: { revisionMode?: boolean; keymap?: Keymap; mode?: 'source' | 'split' | 'rendered'; names?: string[] } = {}) {
+async function mount(markdown = 'one two', options: { revisionMode?: boolean; keymap?: Keymap; mode?: 'source' | 'split' | 'rendered'; names?: string[]; strict?: boolean } = {}) {
   localStorage.setItem('markpage.documents.v1', JSON.stringify((options.names ?? ['A']).map(name => createDocument(markdown, name))))
   localStorage.setItem('markpage.settings.v1', JSON.stringify({
     ...DEFAULT_SETTINGS, locale: 'en-US', showComments: false, viewMode: 'continuous',
@@ -46,7 +47,7 @@ async function mount(markdown = 'one two', options: { revisionMode?: boolean; ke
     keymap: options.keymap ?? DEFAULT_KEYMAP, layout: { ...DEFAULT_SETTINGS.layout, visible: false },
   }))
   root = createRoot(host)
-  await act(() => root!.render(<App />))
+  await act(() => root!.render(options.strict ? <StrictMode><App /></StrictMode> : <App />))
 }
 
 function source() {
@@ -93,6 +94,77 @@ async function writeRevision(text: string) {
   await click(buttonWithText('.dialog-footer button', 'Write change'))
 }
 
+describe('empty workspace lifecycle', () => {
+  async function deleteTab() {
+    const tab = host.querySelector<HTMLElement>('.tab-main')!
+    await act(() => { tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })) })
+    await click(buttonWithText('[role="menuitem"]', t('workspace.delete')))
+  }
+
+  it('closes the last tab without creating documents and can reopen it', async () => {
+    await mount('keep this text')
+    await click(host.querySelector<HTMLButtonElement>('.tab-close')!)
+    expect(host.querySelector('.app-shell')).toBeTruthy()
+    expect(host.querySelectorAll('.document-tab')).toHaveLength(0)
+    expect(host.querySelector('.empty-workspace')).toBeTruthy()
+    await press(window, 'w', { ctrlKey: true, altKey: true })
+    await act(() => vi.advanceTimersByTime(600))
+    const saved = JSON.parse(localStorage.getItem('markpage.documents.v1')!)
+    expect(saved).toHaveLength(1)
+    expect(saved[0]).toMatchObject({ name: 'A', markdown: 'keep this text', open: false })
+    await press(window, 'b', { ctrlKey: true, shiftKey: true })
+    await click(host.querySelector<HTMLElement>('.document-list-item')!)
+    expect(source().value).toBe('keep this text')
+  })
+
+  it('keeps the application visible after deleting the only open draft with closed documents remaining', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await mount('keep this text', { names: ['A', 'B'] })
+    await click(host.querySelector<HTMLButtonElement>('.tab-close')!)
+    await deleteTab()
+    expect(host.querySelector('.app-shell')).toBeTruthy()
+    expect(host.querySelector('.empty-workspace')).toBeTruthy()
+    expect(host.querySelectorAll('.document-tab')).toHaveLength(0)
+    await act(() => vi.advanceTimersByTime(600))
+    expect(JSON.parse(localStorage.getItem('markpage.documents.v1')!)).toHaveLength(1)
+    await click(host.querySelector<HTMLButtonElement>('.empty-workspace .primary-button')!)
+    await input(source(), 'new text')
+    expect(source().value).toBe('new text')
+  })
+
+  it('deletes the final document without replacing it and stays empty after reload', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await mount()
+    await deleteTab()
+    expect(host.querySelector('.empty-workspace')).toBeTruthy()
+    expect(host.querySelectorAll('.document-tab')).toHaveLength(0)
+    expect(host.querySelector<HTMLButtonElement>('.export-trigger')?.disabled).toBe(true)
+    await act(() => vi.advanceTimersByTime(600))
+    expect(JSON.parse(localStorage.getItem('markpage.documents.v1')!)).toEqual([])
+    await act(() => root!.unmount())
+    root = createRoot(host)
+    await act(() => root!.render(<App />))
+    expect(host.querySelector('.empty-workspace')).toBeTruthy()
+    await press(window, 'n', { ctrlKey: true, altKey: true })
+    expect(host.querySelectorAll('.document-tab')).toHaveLength(1)
+  })
+
+  it('restores an existing cache whose documents are all closed', async () => {
+    localStorage.setItem('markpage.documents.v1', JSON.stringify([{ ...createDocument('saved text', 'A'), open: false }]))
+    root = createRoot(host)
+    await act(() => root!.render(<App />))
+    expect(host.querySelector('.app-shell')).toBeTruthy()
+    expect(host.querySelector('.empty-workspace')).toBeTruthy()
+    expect(host.querySelectorAll('.document-tab')).toHaveLength(0)
+  })
+
+  it('allows the keyboard shortcut to close the last tab', async () => {
+    await mount()
+    expect((await press(window, 'w', { ctrlKey: true, altKey: true })).defaultPrevented).toBe(true)
+    expect(host.querySelector('.empty-workspace')).toBeTruthy()
+  })
+})
+
 describe('plugin commands through the application', () => {
   it('exposes registered plugin commands in their own menu and runs them', async () => {
     await mount('one two', { mode: 'rendered' })
@@ -106,6 +178,36 @@ describe('plugin commands through the application', () => {
 })
 
 describe('source commands through the application', () => {
+  it('keeps sessions editable after StrictMode performs its development cleanup cycle', async () => {
+    await mount('base', { strict: true })
+    await input(source(), 'edited')
+    await press(source(), 'z', { ctrlKey: true })
+    expect(source().value).toBe('base')
+  })
+
+  it('shares the session parse between the rendered body and outline for one revision', async () => {
+    const parser = getMarkdownParser(true)
+    const parse = vi.spyOn(parser, 'parse')
+    await mount('shared parse fixture', { mode: 'split' })
+    expect(parse).toHaveBeenCalledTimes(1)
+    await input(source(), 'shared parse fixture updated')
+    expect(parse).toHaveBeenCalledTimes(2)
+    expect(host.querySelector('.document-viewport')?.textContent).toContain('shared parse fixture updated')
+  })
+
+  it('uses the same session for undo and redo delivered before a React render completes', async () => {
+    await mount('base')
+    await input(source(), 'edited')
+    await act(() => {
+      source().focus()
+      source().dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }))
+      source().dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    expect(source().value).toBe('edited')
+    await press(source(), 'z', { ctrlKey: true })
+    expect(source().value).toBe('base')
+  })
+
   it('uses custom format keys and the document undo/redo history in split mode', async () => {
     await mount('one two', { mode: 'split', keymap: { ...DEFAULT_KEYMAP, 'format.bold': 'Mod+K' } })
     await select(0, 3)

@@ -6,6 +6,7 @@ import {
   MAX_SCAN_FILES,
   scanDirectory,
   titleFromPath,
+  writeLocalFile,
 } from './localfs'
 
 interface FakeFile {
@@ -111,4 +112,36 @@ it('supports custom folder depth and file limits without breaking the numeric ov
   expect((await scanDirectory(tree, { depth: 3 })).entries).toHaveLength(2)
   expect((await scanDirectory(tree, { depth: 3, limit: 1 })).truncated).toBe(true)
   expect((await scanDirectory(tree, 1)).entries).toHaveLength(1)
+})
+describe('写盘失败时释放写入流', () => {
+  function fakeWritable(calls: string[], failOnWrite: boolean) {
+    return {
+      write: async () => {
+        calls.push('write')
+        if (failOnWrite) throw new Error('quota exceeded')
+      },
+      close: async () => {
+        calls.push('close')
+      },
+      abort: async () => {
+        calls.push('abort')
+      },
+    }
+  }
+
+  function fakeHandle(calls: string[], failOnWrite: boolean) {
+    return { createWritable: async () => fakeWritable(calls, failOnWrite) } as unknown as FileSystemFileHandle
+  }
+
+  it('写入正常时 close', async () => {
+    const calls: string[] = []
+    await writeLocalFile(fakeHandle(calls, false), '内容')
+    expect(calls).toEqual(['write', 'close'])
+  })
+
+  it('写入抛错时 abort 并向外抛，不留住写入锁', async () => {
+    const calls: string[] = []
+    await expect(writeLocalFile(fakeHandle(calls, true), '内容')).rejects.toThrow('quota exceeded')
+    expect(calls).toEqual(['write', 'abort'])
+  })
 })

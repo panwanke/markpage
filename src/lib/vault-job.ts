@@ -8,7 +8,7 @@
 
 import { buildVaultIndex } from './vault'
 import type { LocalFileEntry } from './localfs'
-import type { LinkIndex } from './links'
+import type { LinkIndex } from '@markpage/extension-obsidian/links'
 
 export interface IndexJobRequest {
   entries: LocalFileEntry[]

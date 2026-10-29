@@ -1,6 +1,6 @@
 import type { MessageKey } from '../i18n'
 import type { DiskBaseline, DiskState } from '../types'
-import { hashContent } from './hash'
+import { hashContent } from '@markpage/core/hash'
 
 /**
  * 上次与磁盘对齐时的指纹。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { caretAfterEdit, sourceSelectionSnapshot } from './source-selection'
+import { caretAfterEdit, sourceSelectionSnapshot } from '@markpage/editor/source-selection'
 
 describe('source editor selection', () => {
   it('reads live selected text and collapsed insertion points', () => {

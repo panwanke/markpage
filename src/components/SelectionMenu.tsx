@@ -1,7 +1,7 @@
 import { Bold, Code2, Copy, Eraser, MessageSquarePlus, Strikethrough } from 'lucide-react'
 import ContextMenu from './ContextMenu'
 import type { MenuEntry } from './ContextMenu'
-import { HIGHLIGHT_COLORS, TEXT_COLORS, toHexColor } from '../lib/palette'
+import { HIGHLIGHT_COLORS, TEXT_COLORS, toHexColor } from '@markpage/core/palette'
 import { useI18n } from '../i18n'
 import type { InlineFormat, SelectionSnapshot } from '../types'
 

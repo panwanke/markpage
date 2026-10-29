@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { localNetworkPermission, VaultBridgeClient } from '../lib/vault-bridge'
 import type { BridgeEvent, BridgeVault } from '../lib/vault-bridge'
-import type { LinkIndex } from '../lib/links'
+import type { LinkIndex } from '@markpage/extension-obsidian/links'
 import type { WorkspaceSession } from './useWorkspace'
 import { DEFAULT_SCAN_LIMITS } from '../lib/storage'
 

@@ -1,4 +1,5 @@
-import type { ExportColorMapping, ExportConfig, ExportElementRule } from '../types'
+import { detectEol } from './frontmatter'
+import type { ExportColorMapping, ExportConfig, ExportElementRule } from './model'
 
 export const DEFAULT_HIGHLIGHT_COLOR = '#fff0a8'
 
@@ -282,18 +283,30 @@ function transformFrontmatter(markdown: string, mode: ExportConfig['frontmatter'
   if (mode === 'keep') return markdown
   const match = FRONTMATTER.exec(markdown)
   if (!match) return markdown
-  const rest = markdown.slice(match[0].length)
-  if (mode === 'remove') return rest.replace(/^\n+/, '')
-  const kept = match[1]
-    .split('\n')
-    .filter((line) => {
-      const key = /^([\w-]+)\s*:/.exec(line)?.[1]
-      return !key || !PAGE_KEYS.includes(key)
-    })
-    .join('\n')
-    .trim()
-  if (!kept) return rest.replace(/^\n+/, '')
-  return `---\n${kept}\n---\n${rest.replace(/^\n+/, '')}`
+  // 重建 frontmatter 时用文档自己的换行，并连 `\r\n` 一起吃掉开头空行：
+  // 恒用 `\n` 的话，CRLF 文档导出后 frontmatter 与正文会是两种换行。
+  const eol = detectEol(markdown)
+  const rest = markdown.slice(match[0].length).replace(/^(?:\r?\n)+/, '')
+  if (mode === 'remove') return rest
+  // 顶层 page key 要连它的嵌套子行一起删：只删 `header:` 会留下悬空的 `  left: x`，
+  // 导出文件的 frontmatter 就成了非法 YAML。
+  const kept: string[] = []
+  let skipping = false
+  for (const line of match[1].split(/\r?\n/)) {
+    const key = /^([\w-]+)\s*:/.exec(line)?.[1]
+    if (key) {
+      skipping = PAGE_KEYS.includes(key)
+      if (skipping) continue
+    } else if (skipping && /^\s/.test(line)) {
+      continue
+    } else {
+      skipping = false
+    }
+    kept.push(line)
+  }
+  const trimmed = kept.join(eol).trim()
+  if (!trimmed) return rest
+  return `---${eol}${trimmed}${eol}---${eol}${rest}`
 }
 
 /**

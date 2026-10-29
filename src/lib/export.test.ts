@@ -8,7 +8,7 @@ import {
   DEFAULT_HIGHLIGHT_COLOR,
   DIRECT_EXPORT,
   isDirectExport,
-} from './export'
+} from '@markpage/core/export'
 import type { ExportConfig } from '../types'
 
 const SOURCE = [
@@ -73,6 +73,22 @@ describe('导出：纯净导出', () => {
   it('不碰围栏代码块与行内代码', () => {
     expect(clean).toContain('<mark>代码块里的标签必须原样保留</mark>')
     expect(clean).toContain('<comment id="x">不应被处理</comment>')
+  })
+})
+
+describe('导出：CRLF 文档', () => {
+  const source = '---\r\ntitle: 测试\r\nheader:\r\n  left: 页眉\r\n---\r\n\r\n正文\r\n第二行\r\n'
+
+  it('剥掉页面设置后仍是 CRLF，不混进 LF，也不残留孤立的 CR', () => {
+    const result = buildExport(source, CLEAN_EXPORT)
+    expect(result).toBe('---\r\ntitle: 测试\r\n---\r\n正文\r\n第二行\r\n')
+    expect(result).not.toMatch(/[^\r]\n/)
+  })
+
+  it('移除整个 frontmatter 时也不会留下开头的 CR', () => {
+    const result = buildExport(source, { ...CLEAN_EXPORT, frontmatter: 'remove' as const })
+    expect(result.startsWith('正文')).toBe(true)
+    expect(result).not.toContain('\r\r')
   })
 })
 

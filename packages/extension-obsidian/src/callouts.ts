@@ -9,7 +9,7 @@
 
 import { visit } from 'unist-util-visit'
 import type { Element, ElementContent, Properties, Root, Text } from 'hast'
-import { slicePosition } from './positions'
+import { slicePosition } from '@markpage/core/positions'
 
 const CALLOUT_MARKER = /^\[!([\w-]+)\]([+-])?(?:[ \t]+([^\n]*))?/
 

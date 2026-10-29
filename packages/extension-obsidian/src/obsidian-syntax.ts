@@ -12,7 +12,7 @@
 import { SKIP, visit } from 'unist-util-visit'
 import type { Element, ElementContent, Parent, Properties, Root, RootContent, Text } from 'hast'
 import { parseWikilink } from './links'
-import { slicePosition } from './positions'
+import { slicePosition } from '@markpage/core/positions'
 
 const OPAQUE_TAGS = new Set(['code', 'pre', 'script', 'style', 'textarea', 'kbd', 'samp'])
 

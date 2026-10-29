@@ -11,6 +11,9 @@ export const zhCN = {
   'document.untitled': '未命名文档',
   'document.titleLabel': '文档标题',
 
+  'workspace.noOpenDocuments': '没有打开的文档',
+  'workspace.emptyHint': '新建或导入 Markdown，也可以从侧栏重新打开已关闭的文档。',
+
   'save.saved': '草稿已存浏览器',
   'save.saving': '正在保存',
   'save.error': '本地存储空间不足',
@@ -516,6 +519,7 @@ export const zhCN = {
   'toast.documentDeleted': '已删除「{name}」',
   'toast.documentDuplicated': '已复制为「{name}」',
   'toast.documentRenamed': '已重命名为「{name}」',
+  'toast.storageFull': '本地存储空间不足，改动只存在内存里 —— 请先导出保存',
 
   'menu.vault': '库',
   'cmd.quickSwitch': '快速切换…',

@@ -17,7 +17,7 @@ import {
   uniqueVaultPath,
   wikilinkAt,
   type LinkIndex,
-} from './links'
+} from '@markpage/extension-obsidian/links'
 
 function indexOf(paths: string[], aliases: Record<string, string> = {}): LinkIndex {
   const index = emptyLinkIndex()

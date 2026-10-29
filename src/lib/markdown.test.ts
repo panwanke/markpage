@@ -196,6 +196,20 @@ describe('选区落在高亮内部时不套娃', () => {
     const next = applyInlineFormat(source, selectionFor(source, '内容'), 'color', '#b3261e')
     expect(next).toBe('段落 <span style="font-weight:600">重点<span style="color:#b3261e">内容</span></span> 结束')
   })
+
+  // 选区落在内层文字中间时 expand() 吃不到标签，改写交给 rewriteInsideWrapper，
+  // 那里必须认准最内层，否则会往里再套一层。
+  it('高亮套高亮时，取消中间那段只脱最内层，不再往里套一层', () => {
+    const source = '一句<mark>甲<mark>一二三</mark>丁</mark>结束'
+    expect(applyInlineFormat(source, selectionFor(source, '二'), 'highlight'))
+      .toBe('一句<mark>甲<mark>一</mark>二<mark>三</mark>丁</mark>结束')
+  })
+
+  it('高亮套高亮时，给中间那段换色也只改最内层', () => {
+    const source = '一句<mark>甲<mark>一二三</mark>丁</mark>结束'
+    expect(applyInlineFormat(source, selectionFor(source, '二'), 'highlight', '#c9f2d4'))
+      .toBe('一句<mark>甲<mark>一</mark><mark style="background-color:#c9f2d4">二</mark><mark>三</mark>丁</mark>结束')
+  })
 })
 
 describe('只取消某一层标注', () => {
@@ -240,6 +254,15 @@ describe('评论完整生命周期', () => {
     expect(getCommentThreads(next)).toHaveLength(0)
     expect(next).toContain('这是一段需要讨论的正文。')
     expect(next).not.toContain('<comment')
+  })
+
+  it('删除评论只收口删除处，不动别处的空行', () => {
+    // 四个空行是用户有意留的视觉分隔，删一条评论不该把它压成三个。
+    const source = '# 标题\n\n\n\n\n正文需要讨论。\n'
+    const commented = addComment(source, selectionFor(source, '需要讨论'), '作者', '一条评论')
+    const [thread] = getCommentThreads(commented)
+    const next = deleteComment(commented, thread.id)
+    expect(next).toBe(source)
   })
 })
 
@@ -295,6 +318,11 @@ describe('Obsidian 语法增强开关', () => {
     // 同模式再问一次仍然拿缓存里的同一棵树。
     expect(parseMarkdown('见 [[x]]', true)).toBe(enhanced)
     expect(parseMarkdown('见 [[x]]', false)).toBe(plain)
+  })
+
+  it('关闭方言时保留块 ID 字面文本', () => {
+    expect(toString(parseMarkdown('正文 ^block-a', false))).toContain('^block-a')
+    expect(toString(parseMarkdown('正文 ^block-a', true))).not.toContain('^block-a')
   })
 })
 

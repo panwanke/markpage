@@ -1,0 +1,5 @@
+.markpage-root.source-editor-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #202129; }
+.markpage-root.source-editor-wrap.is-compact .source-editor { padding: 20px 22px 60px; }
+.markpage-root .source-editor-meta { height: 35px; flex: 0 0 35px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #32333d; color: #777985; font-size: calc(10.5px * var(--ui-scale, 1)); letter-spacing: .12em; }
+.markpage-root .source-editor-meta .revision-live { color: #6fd39a; letter-spacing: .06em; }
+.markpage-root .source-editor { flex: 1; width: 100%; resize: none; border: 0; outline: 0; padding: 24px max(24px, calc((100% - 860px)/2)); background: #202129; color: #d7d5e1; caret-color: #b3a6ff; font: 13px/1.85 "SFMono-Regular", Consolas, monospace; tab-size: 2; }

@@ -1,13 +1,13 @@
 import { createElement, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import type { Element, RootContent } from 'hast'
+import type { Element, Root, RootContent } from 'hast'
 import { toString } from 'hast-util-to-string'
 import { useI18n } from '../i18n'
 import type { MessageKey } from '../i18n'
 import { getRootBlocks, parseMarkdown } from '../lib/markdown'
-import type { ResolvedLink, WikilinkTarget } from '../lib/links'
-import { basenameNoExtension } from '../lib/links'
-import { MAX_EMBED_DEPTH } from '../lib/embeds'
+import type { ResolvedLink, WikilinkTarget } from '@markpage/extension-obsidian/links'
+import { basenameNoExtension } from '@markpage/extension-obsidian/links'
+import { MAX_EMBED_DEPTH } from '@markpage/extension-obsidian/embeds'
 import { applyPluginRenderers } from '../plugins/apply'
 import type { MarkdownPluginRenderer } from '../plugins/apply'
 import type { PageConfig, SelectionMenuRequest, SelectionSnapshot } from '../types'
@@ -31,6 +31,7 @@ export interface DocumentLinkContext {
 
 interface MarkdownDocumentProps {
   markdown: string
+  parsedTree?: Root
   config: PageConfig
   viewMode: 'paged' | 'continuous'
   activeCommentId: string | null
@@ -372,6 +373,7 @@ function computedColor(element: HTMLElement | null, property: 'backgroundColor' 
 
 export default function MarkdownDocument({
   markdown,
+  parsedTree,
   config,
   viewMode,
   activeCommentId,
@@ -389,10 +391,10 @@ export default function MarkdownDocument({
 }: MarkdownDocumentProps) {
   const { t } = useI18n()
   const tree = useMemo(() => {
-    const parsed = parseMarkdown(markdown, obsidianSyntax)
+    const parsed = parsedTree ?? parseMarkdown(markdown, obsidianSyntax)
     if (!pluginRenderers.length) return parsed
     return applyPluginRenderers(parsed, pluginRenderers, { documentId, markdown })
-  }, [markdown, obsidianSyntax, pluginRenderers, documentId])
+  }, [markdown, obsidianSyntax, pluginRenderers, documentId, parsedTree])
   const blocks = useMemo(() => getRootBlocks(tree).filter((node) => !isCommentCallout(node)), [tree])
   const [pages, setPages] = useState<RootContent[][]>([blocks])
   const measureRef = useRef<HTMLDivElement>(null)

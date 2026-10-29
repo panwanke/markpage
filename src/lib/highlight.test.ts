@@ -8,7 +8,7 @@ import config from '../../vite.config'
  * dev 会直接白屏并报「does not provide an export named 'default'」，这里把它钉住。
  */
 describe('代码高亮的预打包清单', () => {
-  const source = readFileSync(new URL('./highlight.ts', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../../packages/core/src/highlight.ts', import.meta.url), 'utf8')
   const languages = [...source.matchAll(/highlight\.js\/lib\/languages\/([\w-]+)/g)].map((match) => match[1])
   const include = ((config.optimizeDeps?.include ?? []) as (string | RegExp)[]).map(String)
 

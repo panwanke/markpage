@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useWorkspace } from './useWorkspace'
-import { hashContent } from '../lib/hash'
+import { hashContent } from '@markpage/core/hash'
 import type { DiskBaseline, DocumentBinding, MarkdownDocument } from '../types'
 import type { PermissionStatus } from '../lib/localfs'
 
@@ -412,6 +412,35 @@ describe('工作空间会话', () => {
     expect(state.created).toHaveLength(0)
     expect(api.conflicts.get('doc-1')?.diskMarkdown).toBe('外部改动')
     expect(api.diskStates.get('doc-1')).toBe('conflict')
+  })
+
+  it('内容撤销回基准但磁盘已被外部改过时，报冲突而不是谎报已保存', async () => {
+    addRoot('A', { 'a.md': '原文' })
+    await mount()
+    await openFolder('A')
+
+    // 写回成功过一次，所以 baseline 与磁盘一致。
+    const edited = makeDoc('doc-1', '改过',
+      { kind: 'workspace', workspaceId: api.session!.id, path: 'a.md' },
+      { hash: hashContent('原文'), lastModified: 1 })
+    store.documents = [edited]
+    await act(async () => { api.enqueueWrite(edited) })
+    await act(async () => { await api.flush(api.session!.id) })
+    expect(api.diskStates.get('doc-1')).toBe('clean')
+
+    // 别的编辑器改成「外部改动」，随后用户在浏览器里撤销回原文。
+    state.roots.get('A')!.files.set('a.md', { content: '外部改动', lastModified: 2 })
+    const reverted = { ...edited, markdown: '原文' }
+    store.documents = [reverted]
+
+    await act(async () => { api.enqueueWrite(reverted) })
+    await act(async () => { await api.flush(api.session!.id) })
+
+    // 浏览器内容确实等于基准，但磁盘已经不是了：必须让用户选，不能静默收尾。
+    expect(api.conflicts.get('doc-1')?.diskMarkdown).toBe('外部改动')
+    expect(api.diskStates.get('doc-1')).toBe('conflict')
+    // 也不能顺手把磁盘覆盖成浏览器副本。
+    expect(state.roots.get('A')!.files.get('a.md')!.content).toBe('外部改动')
   })
 
   it('删除文档后磁盘状态与待写队列一起清掉，关标签不再误报未保存', async () => {

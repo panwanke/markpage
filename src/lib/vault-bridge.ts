@@ -1,5 +1,5 @@
-import { emptyLinkIndex } from './links'
-import type { LinkIndex } from './links'
+import { emptyLinkIndex } from '@markpage/extension-obsidian/links'
+import type { LinkIndex } from '@markpage/extension-obsidian/links'
 import type { VaultConfig } from './vault'
 import { titleFromPath } from './localfs'
 

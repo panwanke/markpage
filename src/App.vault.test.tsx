@@ -348,6 +348,13 @@ describe('写回与冲突', () => {
     await click(buttons[0])
     await waitFor(() => sourceValue() === '外部改过的内容\n', 'adopted disk version')
     await waitFor(() => !host.querySelector('.conflict-dialog'), 'dialog closed')
+    await act(() => {
+      const editor = host.querySelector<HTMLTextAreaElement>('.source-editor')!
+      editor.focus()
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    expect(sourceValue()).toBe('外部改过的内容\n')
+    expect(vault.read('A.md')).toBe('外部改过的内容\n')
   })
 
   it('切回窗口发现磁盘被外部改过时只挂提示，不自动重载', async () => {

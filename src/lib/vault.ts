@@ -7,7 +7,7 @@
  * 3. `buildVaultIndex` 读内容建索引，带 IndexedDB 缓存（按 mtime + size 命中）。
  */
 
-import { hashContent } from './hash'
+import { hashContent } from '@markpage/core/hash'
 import {
   comparePaths,
   isMarkdownPath,
@@ -31,7 +31,7 @@ import {
   stripMarkdownExtension,
   type LinkIndex,
   type LinkReference,
-} from './links'
+} from '@markpage/extension-obsidian/links'
 
 /** 真实 vault 常见 `10-Projects/2026/Q1/客户/会议.md`，4 层远远不够。 */
 export const VAULT_MAX_DEPTH = 8

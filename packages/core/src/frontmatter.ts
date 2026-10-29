@@ -158,6 +158,18 @@ function trailingTriviaLines(region: string): string[] {
 }
 
 /**
+ * 这份文本主要用哪种换行。CRLF 文档第一次写 frontmatter 时如果按 LF 生成，
+ * 同一个文件里就会混着两种换行（Git 会把整段都标成改动）。
+ */
+export function detectEol(sample: string): string {
+  const breaks = sample.match(/\r?\n/g) ?? []
+  // 一个换行都没有时无从判断，按 LF 走（不要因为 0 >= 0 被判成 CRLF）。
+  if (!breaks.length) return '\n'
+  const crlf = breaks.filter((item) => item === '\r\n').length
+  return crlf * 2 >= breaks.length ? '\r\n' : '\n'
+}
+
+/**
  * 只改指定的键：存在则原地替换、不存在则追加，`null` 表示删除这个键。
  * 返回新文本；没改动时返回原字符串（调用方可用恒等比较跳过写盘）。
  */
@@ -165,7 +177,8 @@ export function setFrontmatterKeys(markdown: string, patch: Record<string, Front
   const entries = Object.entries(patch).filter(([, value]) => value !== undefined)
   if (!entries.length) return markdown
   const { block, body, valid } = splitFrontmatter(markdown)
-  const eol = block.includes('\r\n') ? '\r\n' : '\n'
+  // 还没有 frontmatter 时看正文：block 是空的，只按它判断会让 CRLF 文档长出 LF 的 frontmatter。
+  const eol = detectEol(block || markdown)
 
   if (!block) {
     const lines = entries
