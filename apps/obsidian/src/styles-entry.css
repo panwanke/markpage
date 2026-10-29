@@ -1,0 +1,7 @@
+/* Single CSS bundle for the plugin. Vite inlines the @imports and base64-inlines
+   the KaTeX fonts (huge assetsInlineLimit) so styles.css is self-contained.
+   The build then scopes every selector under .markpage-root. */
+@import 'katex/dist/katex.min.css';
+@import 'highlight.js/styles/github.css';
+@import '../../../packages/editor/src/rendered.css';
+@import './styles.css';

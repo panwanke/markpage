@@ -14,7 +14,7 @@
 import { extractSection } from './links'
 
 /** 嵌入层数上限：`A → B → C` 之后就只显示占位，防止深链把一页撑爆。 */
-export const MAX_EMBED_DEPTH = 3
+export { MAX_EMBED_DEPTH } from '@markpage/core/references'
 
 const MAX_ENTRIES = 64
 

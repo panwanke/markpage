@@ -1,0 +1,24 @@
+{
+  "name": "@markpage/obsidian",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MarkPage typography + annotation host for Obsidian.",
+  "scripts": {
+    "build": "node build.mjs",
+    "prepare-vault": "node build.mjs && node prepare.mjs"
+  },
+  "dependencies": {
+    "@markpage/core": "1.1.0",
+    "@markpage/editor": "1.1.0",
+    "@markpage/extension-obsidian": "1.1.0",
+    "lucide-react": "^1.61.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "obsidian": "1.8.7"
+  }
+}

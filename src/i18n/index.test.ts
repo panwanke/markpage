@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { LOCALES, normalizeLocale, translate, type MessageKey } from './index'
-import { zhCN } from './locales/zh-CN'
+import { zhCN } from '@markpage/editor/i18n'
 
 const baseKeys = Object.keys(zhCN) as MessageKey[]
 const placeholders = (template: string) => [...template.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort()

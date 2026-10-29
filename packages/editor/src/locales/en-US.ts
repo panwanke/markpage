@@ -407,7 +407,7 @@ export const enUS: Messages = {
   'settings.language.title': 'Language',
   'settings.language.hint': 'The interface switches instantly; document content is never rewritten.',
   'settings.language.interface': 'Interface language',
-  'settings.language.interfaceHint': 'To add a language, drop one more message file into src/i18n/locales.',
+  'settings.language.interfaceHint': 'To add a language, drop one more message file into packages/editor/src/locales.',
   'settings.language.preview': 'Preview',
 
   'settings.plugins.title': 'Plugin platform',

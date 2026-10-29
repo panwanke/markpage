@@ -7,34 +7,27 @@
  */
 
 import { readFrontmatter } from '@markpage/core/frontmatter'
+import {
+  ASSET_EXTENSION,
+  MARKDOWN_LINK_EXTENSION,
+  basenameNoExtension,
+  dirnameOf,
+  joinVaultPath,
+  normalizeVaultPath,
+} from '@markpage/core/references'
+import type { ResolvedLink, WikilinkTarget } from '@markpage/core/references'
 
-export const ASSET_EXTENSION = /\.(png|jpe?g|gif|svg|webp|avif|bmp|pdf|mp3|mp4|webm|wav|ogg|m4a|flac)$/i
-
-export const MARKDOWN_LINK_EXTENSION = /\.(md|markdown|mdown|mkd)$/i
-
-export interface WikilinkTarget {
-  /** 方括号里的原始内容，便于提示与调试。 */
-  raw: string
-  /** 目标笔记（不含 `#` 之后的部分）；空串表示「本文」。 */
-  note: string
-  /** `#标题`。 */
-  anchor: string
-  /** `#^块id`。 */
-  block: string
-  /** `|别名`。 */
-  alias: string
-  embed: boolean
-  /** `![[图.png]]`：附件而不是笔记。 */
-  asset: boolean
-}
-
-export interface ResolvedLink {
-  path: string
-  /** 同名笔记不止一个：调用方应当提示「已选最短路径」。 */
-  ambiguous: boolean
-  /** 同名 / 同别名的候选数量，提示文案里要用；不歧义时不填。 */
-  ambiguousCount?: number
-}
+export {
+  ASSET_EXTENSION,
+  MARKDOWN_LINK_EXTENSION,
+  basenameNoExtension,
+  basenameOf,
+  dirnameOf,
+  joinVaultPath,
+  normalizeVaultPath,
+  stripMarkdownExtension,
+} from '@markpage/core/references'
+export type { ResolvedLink, WikilinkTarget } from '@markpage/core/references'
 
 export interface LinkReference {
   from: string
@@ -80,25 +73,6 @@ export function emptyLinkIndex(): LinkIndex {
   }
 }
 
-export function normalizeVaultPath(path: string): string {
-  let value = path.replace(/\\/g, '/').trim()
-  try {
-    value = decodeURIComponent(value)
-  } catch {
-    // 非法百分号编码：保留原样，比抛错好。
-  }
-  const parts: string[] = []
-  for (const segment of value.split('/')) {
-    if (!segment || segment === '.') continue
-    if (segment === '..') {
-      parts.pop()
-      continue
-    }
-    parts.push(segment)
-  }
-  return parts.join('/')
-}
-
 /** 还原百分号编码；非法编码原样返回。 */
 function decodePart(value: string): string {
   try {
@@ -106,30 +80,6 @@ function decodePart(value: string): string {
   } catch {
     return value
   }
-}
-
-export function dirnameOf(path: string): string {
-  const normalized = normalizeVaultPath(path)
-  const index = normalized.lastIndexOf('/')
-  return index < 0 ? '' : normalized.slice(0, index)
-}
-
-export function joinVaultPath(base: string, rest: string): string {
-  return normalizeVaultPath(base ? `${base}/${rest}` : rest)
-}
-
-export function basenameOf(path: string): string {
-  const normalized = normalizeVaultPath(path)
-  const index = normalized.lastIndexOf('/')
-  return index < 0 ? normalized : normalized.slice(index + 1)
-}
-
-export function stripMarkdownExtension(path: string): string {
-  return path.replace(MARKDOWN_LINK_EXTENSION, '')
-}
-
-export function basenameNoExtension(path: string): string {
-  return stripMarkdownExtension(basenameOf(path))
 }
 
 /** 解析 `[[…]]` 的内容；`embed` 由前面的 `!` 决定。 */

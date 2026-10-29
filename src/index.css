@@ -31,11 +31,5 @@ button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid rgba(108, 92, 231, .45); outline-offset: 2px; }
-/* 选区必须一眼看得出来：半透明紫压在黄色高亮底上几乎不可见，会被误认为「选不中」。
-   改成实心紫 + 白字，任何背景（高亮、着色文字、评论锚点、修订标记）上都能拉开对比。 */
 ::selection { background: #6c5ce7; color: #fff; }
-.markdown-body mark::selection, .markdown-body mark *::selection,
-.comment-anchor::selection, .comment-anchor *::selection,
-.markdown-body ins::selection, .markdown-body ins *::selection,
-.markdown-body .rev-del::selection, .markdown-body .rev-del *::selection,
-.markdown-body span[style*="color"]::selection, .markdown-body span[style*="color"] *::selection { background: #5848cf; color: #fff; }
+/* 正文里高亮 / 锚点上的选区对比度规则在 @markpage/editor/rendered.css。 */

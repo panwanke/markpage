@@ -15,7 +15,8 @@
     "./export": "./src/export.ts",
     "./markdown": "./src/markdown.ts",
     "./syntax-extension": "./src/syntax-extension.ts",
-    "./session": "./src/session.ts"
+    "./session": "./src/session.ts",
+    "./references": "./src/references.ts"
   },
   "dependencies": {
     "yaml": "2.9.1",

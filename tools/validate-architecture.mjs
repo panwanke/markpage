@@ -39,23 +39,34 @@ function imports(source, path) {
   return found
 }
 
+async function readManifests(root, subdir, isApp) {
+  const entries = await readdir(join(root, subdir), { withFileTypes: true }).catch((error) => {
+    if (error.code === 'ENOENT') return []
+    throw error
+  })
+  const found = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const directory = join(root, subdir, entry.name)
+    const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
+    found.push({ directory, isApp, ...manifest })
+  }
+  return found
+}
+
 /** Validate package direction and every cross-package import against explicit exports. */
 export async function validateArchitecture(root) {
   root = resolve(root)
   const errors = []
-  const packages = []
-  for (const entry of await readdir(join(root, 'packages'), { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const directory = join(root, 'packages', entry.name)
-    const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
-    packages.push({ directory, ...manifest })
-  }
+  const packages = [...await readManifests(root, 'packages', false), ...await readManifests(root, 'apps', true)]
   const byName = new Map(packages.map((pkg) => [pkg.name, pkg]))
   const ownerOf = (path) => packages.find((pkg) => inside(path, pkg.directory))
   const allowed = {
     '@markpage/core': [],
     '@markpage/editor': ['@markpage/core'],
     '@markpage/extension-obsidian': ['@markpage/core'],
+    // A host app assembles every layer and is the only place allowed to touch obsidian/react/builtins.
+    '@markpage/obsidian': ['@markpage/core', '@markpage/editor', '@markpage/extension-obsidian'],
   }
   for (const pkg of packages) {
     if (!pkg.private) errors.push(`${pkg.name}: shared packages must be private`)
@@ -64,7 +75,7 @@ export async function validateArchitecture(root) {
       if (byName.has(dependency) && !allowed[pkg.name]?.includes(dependency)) {
         errors.push(`${pkg.name}: forbidden dependency on ${dependency}`)
       }
-      if (pkg.name !== '@markpage/editor' && (dependency === 'obsidian' || dependency.startsWith('react'))) {
+      if (!pkg.isApp && pkg.name !== '@markpage/editor' && (dependency === 'obsidian' || dependency.startsWith('react'))) {
         errors.push(`${pkg.name}: forbidden host/UI dependency ${dependency}`)
       }
     }
@@ -94,7 +105,7 @@ export async function validateArchitecture(root) {
           errors.push(`${location}: cross-package relative import ${specifier}`)
         }
       }
-      if (owner && (specifier === 'obsidian' || isBuiltin(specifier)
+      if (owner && !owner.isApp && (specifier === 'obsidian' || isBuiltin(specifier)
         || (owner.name !== '@markpage/editor' && /^(react|react-dom)(\/|$)/.test(specifier)))) {
         errors.push(`${location}: forbidden host/UI import ${specifier}`)
       }

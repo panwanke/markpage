@@ -57,6 +57,21 @@ describe('package architecture gate', () => {
     expect((await validateArchitecture(root)).errors.join('\n')).toContain('invalid dependency direction')
   })
 
+  it('lets a host app import obsidian and react while still enforcing shared-package direction', async () => {
+    const root = await fixture()
+    const app = join(root, 'apps', 'obsidian')
+    await mkdir(join(app, 'src'), { recursive: true })
+    await writeFile(join(app, 'package.json'), JSON.stringify({
+      name: '@markpage/obsidian', private: true,
+      dependencies: { '@markpage/core': '1.1.0', obsidian: '1.8.7', react: '19.3.1' },
+    }))
+    await writeFile(join(app, 'src/main.ts'), "import 'obsidian'\nimport 'react'\nimport { value } from '@markpage/core'\n")
+    expect((await validateArchitecture(root)).errors).toEqual([])
+    // A shared package reaching into the app still breaks the direction rule.
+    await writeFile(join(root, 'packages/core/src/index.ts'), "import '@markpage/obsidian'\n")
+    expect((await validateArchitecture(root)).errors.join('\n')).toContain('invalid dependency direction')
+  })
+
   it('rejects reintroduced web copies of a migrated algorithm', async () => {
     const root = await fixture()
     await mkdir(join(root, 'src/lib'))

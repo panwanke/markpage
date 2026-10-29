@@ -1,0 +1,75 @@
+/* Plugin chrome + the CSS custom properties the shared rendered layer expects.
+   Every rule here already carries `.markpage-root`, so the build-time scoper
+   leaves it untouched while it prefixes the unscoped shared/vendor CSS. */
+
+.markpage-root {
+  --ui-font: Inter, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ui-scale: 1;
+  --ui-width: 1;
+  --doc-font: Georgia, "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", SimSun, serif;
+  --accent: #6c5ce7;
+  --accent-dark: #5848cf;
+  --accent-soft: #efedff;
+  --text: #292b32;
+  --muted: #858793;
+  --border: #e8e8ed;
+  --panel: #ffffff;
+  --canvas: #f3f4f6;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: var(--ui-font);
+  color: var(--text);
+  background: var(--canvas);
+}
+
+.markpage-root .markpage-view-container { height: 100%; display: flex; flex-direction: column; }
+.markpage-root .markpage-host { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.markpage-root .markpage-host-loading { padding: 32px; color: var(--muted); }
+
+.markpage-root .markpage-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.markpage-root .markpage-toolbar-group { display: flex; align-items: center; gap: 4px; }
+.markpage-root .markpage-toolbar-button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.markpage-root .markpage-toolbar-button:hover { background: var(--accent-soft); color: var(--accent-dark); }
+.markpage-root .markpage-toolbar-button.is-on { color: var(--accent); background: var(--accent-soft); border-color: var(--border); }
+.markpage-root .markpage-toolbar-button:disabled { opacity: .4; cursor: default; }
+.markpage-root .markpage-toolbar-button:disabled:hover { background: transparent; color: var(--muted); }
+
+.markpage-root .markpage-banner {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.markpage-root .markpage-banner.is-readonly { color: #8a5a00; background: #fff5e0; }
+
+.markpage-root .markpage-body { flex: 1; display: flex; min-height: 0; }
+.markpage-root .markpage-document { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.markpage-root .markpage-comments {
+  flex: 0 0 calc(320px * var(--ui-width, 1));
+  min-height: 0;
+  overflow: auto;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}

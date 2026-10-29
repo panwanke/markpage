@@ -400,7 +400,7 @@ export const zhCN = {
   'settings.language.title': '语言',
   'settings.language.hint': '界面语言即时切换，文档内容不会被改写。',
   'settings.language.interface': '界面语言',
-  'settings.language.interfaceHint': '新增语言只需在 src/i18n/locales 下补充一份词表。',
+  'settings.language.interfaceHint': '新增语言只需在 packages/editor/src/locales 下补充一份词表。',
   'settings.language.preview': '预览',
 
   'settings.plugins.title': '插件平台',
