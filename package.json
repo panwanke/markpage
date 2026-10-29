@@ -4,28 +4,31 @@
   "version": "1.2.0",
   "type": "module",
   "workspaces": [
-    "packages/*",
-    "apps/*"
+    "packages/*"
   ],
   "scripts": {
     "dev": "vite",
-    "build": "npm run build:web && npm run build:obsidian",
+    "build": "npm run build:web",
+    "build:all": "npm run build:web && npm run build:obsidian",
     "build:web": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:web": "vitest run src packages tools",
     "build:bridge": "node obsidian-plugin/build.mjs",
     "test:contracts": "vitest run packages/core/test packages/editor/test src/lib/document-session.test.ts tools/validate-architecture.test.ts apps/obsidian/test",
     "test:obsidian-probe": "vitest run tools/obsidian-probe",
     "build:obsidian-probe": "tsc -p tools/obsidian-probe/tsconfig.json && node tools/obsidian-probe/build.mjs",
     "prepare:obsidian-probe": "npm run build:obsidian-probe && node tools/obsidian-probe/prepare.mjs",
-    "typecheck": "tsc -b && tsc -p packages/core/tsconfig.json && tsc -p packages/editor/tsconfig.json && tsc -p packages/extension-obsidian/tsconfig.json && tsc -p tools/obsidian-probe/tsconfig.json && tsc -p apps/obsidian/tsconfig.json",
+    "typecheck:web": "tsc -b && tsc -p packages/core/tsconfig.json && tsc -p packages/editor/tsconfig.json && tsc -p packages/extension-obsidian/tsconfig.json && tsc -p tools/obsidian-probe/tsconfig.json",
+    "typecheck": "npm run typecheck:web && tsc -p apps/obsidian/tsconfig.json",
     "validate:architecture": "node tools/validate-architecture.mjs",
     "build:obsidian": "tsc -p apps/obsidian/tsconfig.json && node apps/obsidian/build.mjs && npm run validate:artifact",
     "prepare:obsidian": "npm run build:obsidian && node apps/obsidian/prepare.mjs",
     "install:obsidian": "node apps/obsidian/install.mjs",
     "validate:artifact": "node apps/obsidian/validate-artifact.mjs",
-    "validate:all": "npm run lint && npm run validate:architecture && npm run typecheck && npm test && npm run build"
+    "sync:obsidian": "npm --prefix apps/obsidian run engine:sync",
+    "validate:all": "npm run lint && npm run validate:architecture && npm run typecheck && npm test && npm run build:all"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

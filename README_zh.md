@@ -286,16 +286,15 @@ tools/
 
 ## 共享包与 Obsidian 宿主
 
-核心算法、解析器/编辑会话、源码编辑器及已有 Obsidian 方言/双链逻辑现已迁入三个
-[npm workspace 共享包](packages/README.md)，网页直接消费这些公共入口。
-完整排版编辑器和正式宿主仍待迁移；包边界用
-`npm run validate:architecture` 检查。
+网页与 [MarkPage Obsidian 插件](https://github.com/panwanke/markpage-obsidian)
+共用三个 [workspace 包](packages/README.md)。插件在独立仓库维护，母库用可选的
+`apps/obsidian` submodule 固定其版本。
 
-正式 Obsidian 宿主仍处于 P0 兼容验证阶段。运行
-`npm run prepare:obsidian-probe` 可构建诊断插件并生成新的合成测试库，再由用户按
-[探针操作说明](tools/obsidian-probe/README.md) 自行打开和操作。命令不启动 Obsidian、
-不启用插件、不修改现有知识库。该探针独立于未来的 MarkPage 编辑器；
-正式保存实现前仍需取得原生编辑器关闭与落盘行为的真实宿主验证结果。
+网站开发直接运行 `npm ci`、`npm run build`，无需检出插件。双端开发使用
+`--recurse-submodules` 克隆（已有克隆运行 `git submodule update --init --recursive`），
+再运行 `npm run validate:all` 或 `npm run build:all`。母库共享引擎修改提交后，
+运行 `npm run sync:obsidian` 检查兼容并更新插件引擎版本。安装及验收说明归插件
+仓库维护；真实宿主验收仍待完成。
 
 ## 部署
 
@@ -308,12 +307,3 @@ tools/
 [MIT](LICENSE) © 2026 panwanke
 
 Bridge 0.2 支持开启写入并配对令牌后自动保存原 Markdown 文件；原生编辑器占用或版本冲突时暂停。Ctrl+S 立即保存当前文件，导出为独立操作。桥接连接期间暂停直接文件夹写入，详情见 [桥接说明](obsidian-plugin/README.md)。
-
-## Obsidian desktop candidate
-
-The native MarkPage view is developed in the same workspace under `apps/obsidian/`.
-Run `npm run prepare:obsidian` to build it and create a synthetic test vault;
-no web server or bridge is needed. See [installation](apps/obsidian/README.md) and
-[manual acceptance tests](apps/obsidian/TESTING.md). Real-host acceptance is pending.
-
-`npm run build` now builds both hosts; `npm run build:web` builds only the website.

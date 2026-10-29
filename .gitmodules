@@ -1,0 +1,4 @@
+[submodule "obsidian"]
+	path = apps/obsidian
+	url = https://github.com/panwanke/markpage-obsidian.git
+	branch = main

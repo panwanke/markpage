@@ -293,17 +293,16 @@ tools/
 
 ## Shared packages and Obsidian host
 
-Shared core algorithms, the parser/editing sessions, the source editor and existing
-Obsidian dialect/link helpers now live in three [npm workspace packages](packages/README.md), consumed
-by the web app. The full rendered editor and production Obsidian host remain pending. Run `npm run validate:architecture` to check dependency boundaries.
+The web app and [MarkPage for Obsidian](https://github.com/panwanke/markpage-obsidian)
+share the three [workspace packages](packages/README.md). The plugin is maintained
+in its own repository and pinned here as the optional `apps/obsidian` submodule.
 
-The production Obsidian host remains at its P0 compatibility gate. Run
-`npm run prepare:obsidian-probe` to build a diagnostic plugin and generate a fresh
-synthetic vault. Open and operate that vault yourself using the
-[probe instructions](tools/obsidian-probe/README.md). This command does not launch
-Obsidian, enable plugins, or change an existing vault. The diagnostic plugin is
-separate from the future MarkPage editor; native save/close behavior still needs
-user-operated real-host evidence before the production save implementation.
+Website development uses `npm ci` and `npm run build`; no submodule is required.
+For both hosts, clone with `--recurse-submodules` (or run `git submodule update --init --recursive`),
+then use `npm run validate:all` or `npm run build:all`.
+After committing shared-engine changes, `npm run sync:obsidian` checks compatibility
+and updates the plugin engine pin. Plugin installation and acceptance instructions
+live in its own repository. Real-host acceptance remains pending.
 
 ## Deployment
 
@@ -314,12 +313,3 @@ A single build publishes to two targets in parallel: GitHub Pages and Cloudflare
 ## License
 
 [MIT](LICENSE) © 2026 panwanke
-
-## Obsidian desktop candidate
-
-The native MarkPage view is developed in the same workspace under `apps/obsidian/`.
-Run `npm run prepare:obsidian` to build it and create a synthetic test vault;
-no web server or bridge is needed. See [installation](apps/obsidian/README.md) and
-[manual acceptance tests](apps/obsidian/TESTING.md). Real-host acceptance is pending.
-
-`npm run build` now builds both hosts; `npm run build:web` builds only the website.

@@ -12,13 +12,13 @@ of each migrated implementation; the architecture gate rejects old web copies.
 
 This is an incremental extraction of existing web behavior. It does not establish
 that every plan-v2 syntax or source-mapping requirement has been implemented.
-A desktop Obsidian candidate now lives in `apps/obsidian/`; build, install and
+The independently maintained Obsidian candidate is pinned as the optional `apps/obsidian/` submodule; build, install and
 manual acceptance steps are in its README and TESTING guide. Real-host acceptance
 is still pending. The separate diagnostic
 under `tools/obsidian-probe/` records real-host API observations only.
 
 Use `npm run typecheck`, `npm run validate:architecture`, `npm test` and
-`npm run build` from the root. `npm run test:contracts` runs the current core,
+`npm run build:all` from the root after initializing submodules. `npm run test:contracts` runs the current core,
 editor-isolation, browser-adapter and architecture contracts. Core and extension typechecks omit the DOM library;
 React/React DOM are editor peers and resolve to the root versions.
 

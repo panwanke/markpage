@@ -30,6 +30,11 @@ afterEach(async () => {
 })
 
 describe('package architecture gate', () => {
+  it('supports a website checkout with an uninitialized optional plugin submodule', async () => {
+    const root = await fixture()
+    await mkdir(join(root, 'apps/obsidian'), { recursive: true })
+    expect((await validateArchitecture(root)).errors).toEqual([])
+  })
   it('allows public package imports from the web host', async () => {
     const root = await fixture()
     await writeFile(join(root, 'src/App.ts'), "import { value } from '@markpage/core'\n")

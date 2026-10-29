@@ -37,20 +37,13 @@ jobs:
         run: npm run validate:architecture
 
       - name: Typecheck web and shared packages
-        run: npm run typecheck
+        run: npm run typecheck:web
 
       - name: Test
-        run: npm test
+        run: npm run test:web
 
       - name: Build
         run: npm run build
-
-      - name: Upload Obsidian candidate
-        uses: actions/upload-artifact@v4
-        with:
-          name: markpage-obsidian
-          path: apps/obsidian/dist/
-          retention-days: 14
 
       - uses: actions/configure-pages@v5
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -67,6 +60,24 @@ jobs:
           name: dist
           path: dist
           retention-days: 1
+
+  obsidian-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run validate:all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: markpage-obsidian-integration
+          path: apps/obsidian/dist/
+          retention-days: 14
 
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
