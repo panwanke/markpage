@@ -7,12 +7,14 @@ of each migrated implementation; the architecture gate rejects old web copies.
 | Package | Current implementation | Still pending |
 | --- | --- | --- |
 | `@markpage/core` | Models, Markdown parser/highlighting, formatting/comments, history, revisions/export, versioned DocumentSession and syntax contribution contract | Source mapping hardening, host save/recovery adapters and full extension API v2 |
-| `@markpage/editor` | Controlled source editor, revision input, composition handling, source selection, scoped source styles | Rendered/paged editor, toolbar, panels, per-instance i18n and UI extension registry |
+| `@markpage/editor` | Controlled source input, rendered/paged Markdown, formatting toolbar, comments, context menus, instance locale providers and scoped styles | Full API-v2 UI extension registry |
 | `@markpage/extension-obsidian` | Explicit syntax contribution, existing link/index helpers, callouts, block IDs and embed cache | Token-level parsing, ambiguity/completeness contracts, embed budgets and index upgrades |
 
 This is an incremental extraction of existing web behavior. It does not establish
 that every plan-v2 syntax or source-mapping requirement has been implemented.
-The production Obsidian application is not built yet. The separate diagnostic
+A desktop Obsidian candidate now lives in `apps/obsidian/`; build, install and
+manual acceptance steps are in its README and TESTING guide. Real-host acceptance
+is still pending. The separate diagnostic
 under `tools/obsidian-probe/` records real-host API observations only.
 
 Use `npm run typecheck`, `npm run validate:architecture`, `npm test` and
@@ -23,7 +25,7 @@ React/React DOM are editor peers and resolve to the root versions.
 Consumers import explicit package exports; cross-package relative paths and
 `@markpage/PACKAGE/src/...` imports fail validation. Core depends on neither editor
 nor extension; editor and extension may depend on core, and hosts assemble them.
-The existing web plugin registry remains API 1.1 until the later API-v2 migration;
+The existing web plugin registry remains API 1.2 until the later API-v2 migration;
 the shared core API major marker does not upgrade that registry by itself.
 
 To change a migrated behavior, edit the owning package and extend an existing
@@ -71,5 +73,7 @@ this is not a new disk conflict or durability guarantee.
 App and the rendered body reuse the same session parse. Inactive web sessions
 release their derived-tree references while retaining history. The root
 `src/lib/markdown.ts` is a small host assembly adapter; parser, formatting and
-comment algorithms live only in core. The rendered component, i18n, selection
-revision binding and formal Obsidian save/recovery integration remain pending.
+comment algorithms live only in core. Rendered components and instance locale providers now live in editor. The
+Obsidian host binds selections to session revisions and supplies one guarded save
+controller per TFile, with independent recovery persistence. This does not
+upgrade the web UI registry to the full planned API v2.

@@ -308,3 +308,12 @@ tools/
 [MIT](LICENSE) © 2026 panwanke
 
 Bridge 0.2 支持开启写入并配对令牌后自动保存原 Markdown 文件；原生编辑器占用或版本冲突时暂停。Ctrl+S 立即保存当前文件，导出为独立操作。桥接连接期间暂停直接文件夹写入，详情见 [桥接说明](obsidian-plugin/README.md)。
+
+## Obsidian desktop candidate
+
+The native MarkPage view is developed in the same workspace under `apps/obsidian/`.
+Run `npm run prepare:obsidian` to build it and create a synthetic test vault;
+no web server or bridge is needed. See [installation](apps/obsidian/README.md) and
+[manual acceptance tests](apps/obsidian/TESTING.md). Real-host acceptance is pending.
+
+`npm run build` now builds both hosts; `npm run build:web` builds only the website.

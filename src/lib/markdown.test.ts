@@ -36,6 +36,24 @@ function findSourceSpans(markdown: string) {
 }
 
 describe('源码位置映射', () => {
+  it.each([
+    ['实体 &amp;、转义 \\*、emoji 👩‍🔬。普通中文可选择。', '普通中文可选择。'],
+    ['same &amp; same', 'same'],
+    ['&#x1F600; tail', 'tail'],
+    ['&semi; tail', 'tail'],
+    ['\\* tail', 'tail'],
+  ])('maps unchanged text around decoded tokens in %s', (source, suffix) => {
+    const spans = findSourceSpans(source)
+    const tail = spans.find((span) => span.text.endsWith(suffix) && span.end === source.length)
+    expect(tail).toBeDefined()
+    for (const span of spans) expect(source.slice(span.start, span.end)).toBe(span.text)
+    // Neither a partial entity nor the punctuation inside an escape is mapped.
+    for (const match of source.matchAll(/&[^;]+;|\\\*/g)) {
+      for (const span of spans) expect(span.end <= match.index || span.start >= match.index + match[0].length).toBe(true)
+    }
+    expect(toString(parseMarkdown(source))).toContain(suffix)
+  })
+
   it('为 GFM 任务列表文本补齐可映射的源码范围', () => {
     const source = '- [ ] 未完成任务\n- [x] 已完成任务\n'
     const spans = findSourceSpans(source)

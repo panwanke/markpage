@@ -314,3 +314,12 @@ A single build publishes to two targets in parallel: GitHub Pages and Cloudflare
 ## License
 
 [MIT](LICENSE) © 2026 panwanke
+
+## Obsidian desktop candidate
+
+The native MarkPage view is developed in the same workspace under `apps/obsidian/`.
+Run `npm run prepare:obsidian` to build it and create a synthetic test vault;
+no web server or bridge is needed. See [installation](apps/obsidian/README.md) and
+[manual acceptance tests](apps/obsidian/TESTING.md). Real-host acceptance is pending.
+
+`npm run build` now builds both hosts; `npm run build:web` builds only the website.

@@ -73,6 +73,7 @@ const PLUGIN_TEXT: Record<string, { name: MessageKey; description: MessageKey }>
 
 // 构建期注入；在 vitest / 未走 vite 的环境里没有这个全局，退化成 dev 而不是抛错。
 const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'
+const APP_BUILD = typeof __APP_BUILD__ === 'object' ? __APP_BUILD__ : { api: 2, sha: 'dev', dirty: false }
 
 export default function SettingsModal({
   bridgeStatus,
@@ -127,7 +128,7 @@ export default function SettingsModal({
           <button className={tab === 'language' ? 'active' : ''} onClick={() => setTab('language')}><Languages size={17} /> {t('settings.tab.language')}</button>
           <button className={tab === 'plugins' ? 'active' : ''} onClick={() => setTab('plugins')}><Puzzle size={17} /> {t('settings.tab.plugins')}</button>
           <button className={tab === 'vault' ? 'active' : ''} onClick={() => setTab('vault')}><Library size={17} /> {t('settings.tab.vault')}</button>
-          <div className="settings-version">MARKPAGE<br />VERSION {APP_VERSION}</div>
+          <div className="settings-version">MARKPAGE<br />VERSION {APP_VERSION}<br />API {APP_BUILD.api} · {APP_BUILD.sha.slice(0, 8)}{APP_BUILD.dirty ? '*' : ''}</div>
         </div>
         <div className="settings-content">
           <button className="icon-button settings-close" title={t('settings.close')} onClick={onClose}><X size={19} /></button>

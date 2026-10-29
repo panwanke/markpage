@@ -70,6 +70,8 @@ export async function validateArchitecture(root) {
     }
   }
   const files = [...await sourceFiles(join(root, 'src'))]
+  const apps = await readdir(join(root, 'apps'), { withFileTypes: true }).catch((error) => { if (error.code === 'ENOENT') return []; throw error })
+  for (const app of apps) if (app.isDirectory()) files.push(...await sourceFiles(join(root, 'apps', app.name, 'src')))
   for (const pkg of packages) files.push(...await sourceFiles(join(pkg.directory, 'src')))
   for (const path of files) {
     const owner = ownerOf(path)

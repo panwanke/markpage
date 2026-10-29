@@ -1,0 +1,60 @@
+@import '../../../packages/editor/src/styles.css';
+@import 'katex/dist/katex.min.css';
+
+.markpage-host { padding: 0; overflow: hidden; height: 100%; }
+.markpage-host-editor { --ui-scale: 1; --ui-width: 1; --accent: var(--interactive-accent, #6c5ce7); --accent-soft: var(--background-modifier-hover, #efedff); --border: var(--background-modifier-border, #e8e8ed); --doc-font: Georgia, "Noto Serif CJK SC", "Songti SC", SimSun, serif; display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--text-normal); background: var(--background-primary); font-family: var(--font-interface); }
+.markpage-host-editor *, .markpage-host-editor *::before, .markpage-host-editor *::after { box-sizing: border-box; }
+.markpage-host-toolbar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 8px; border-bottom: 1px solid var(--border); }
+.markpage-host-toolbar button[aria-pressed="true"] { background: var(--interactive-accent); color: var(--text-on-accent); }
+.markpage-host-format { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px; border-bottom: 1px solid var(--border); }
+.markpage-host-format details { position: relative; }
+.markpage-host-format fieldset { position: absolute; top: 100%; left: 0; z-index: 10; display: grid; gap: 8px; width: 260px; padding: 12px; background: var(--background-primary); border: 1px solid var(--border); }
+.markpage-host-format label { display: grid; gap: 4px; }
+.markpage-host-status, .markpage-host-footer { padding: 5px 10px; font-size: var(--font-ui-smaller); color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.markpage-host-status.is-conflict, .markpage-host-status.is-save-error, .markpage-host-status.is-missing { color: var(--text-error); }
+.markpage-host-warning { padding: 10px; background: var(--background-secondary); border-bottom: 1px solid var(--border); }
+.markpage-host-warning button { margin: 4px; }
+.markpage-host-warning pre { max-height: 160px; overflow: auto; white-space: pre-wrap; }
+.markpage-host-content { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.markpage-host-content > .document-viewport { flex: 1; min-width: 0; }
+/* Obsidian disables selection on body; opt the rendered note back in. */
+.markpage-host-editor .page-content { -webkit-user-select: text; user-select: text; }
+.markpage-host-content.mode-split > .document-viewport { flex-basis: 50%; padding: 16px 12px 40px; }
+.markpage-host-content.mode-split > .source-editor-wrap { flex-basis: 50%; }
+.markpage-host-content.mode-split .page-content { padding: 60px 30px; }
+.markpage-host-content.mode-split .page-running-header, .markpage-host-content.mode-split .page-running-footer { left: 30px; right: 30px; }
+.markpage-host-content .source-editor { min-height: 0; height: 100%; box-shadow: none; }
+.markpage-host-content .comments-panel { width: 280px; flex: 0 0 280px; border-left: 1px solid var(--border); }
+.markpage-host-content .comment-actions, .markpage-host-content .reply-box { margin: 0; border-left: 0; border-right: 0; border-bottom: 0; }
+.markpage-host-links { width: 240px; flex: 0 0 240px; padding: 10px; overflow: auto; border-left: 1px solid var(--border); }
+.markpage-host-links section > button { display: block; width: 100%; height: auto; white-space: normal; text-align: left; margin: 4px 0; }
+.markpage-host-footer { display: flex; justify-content: space-between; align-items: center; }
+.markpage-host-composer { display: flex; gap: 8px; padding: 10px; align-items: flex-start; }
+.markpage-host-composer textarea { flex: 1; min-height: 80px; }
+.markpage-host-editor ::selection { background: #6c5ce7; color: white; }
+.markpage-host-editor .context-menu-head small { white-space: normal; overflow-wrap: anywhere; }
+/* Explicit menu surfaces prevent host button defaults from leaking through. */
+.markpage-host-editor .context-menu { background-color: var(--background-primary, #fff); color: var(--text-normal, #33343a); border-color: var(--background-modifier-border, #e4e1ee); }
+.markpage-host-editor .context-menu-head { border-color: var(--background-modifier-border, #e4e1ee); }
+.markpage-host-editor .context-menu-head strong, .markpage-host-editor .context-menu-item { color: var(--text-normal, #33343a); }
+.markpage-host-editor .context-menu-head small, .markpage-host-editor .context-menu-icon, .markpage-host-editor .context-menu-shortcut, .markpage-host-editor .context-menu-colors-label { color: var(--text-muted, #686974); }
+.markpage-host-editor button.context-menu-item { background: transparent; box-shadow: none; border: 0; margin: 0; height: auto; min-height: 28px; justify-content: flex-start; white-space: normal; line-height: 1.5; }
+.markpage-host-editor button.context-menu-item:disabled { background: transparent; color: var(--text-muted, #686974); box-shadow: none; opacity: .6; cursor: default; }
+.markpage-host-editor button.context-menu-item:hover:not(:disabled), .markpage-host-editor button.context-menu-item:focus-visible { background: var(--background-modifier-hover, #f2f0fb); box-shadow: none; }
+.markpage-host-editor .context-menu-separator { background: var(--background-modifier-border, #e4e1ee); }
+.markpage-host-editor button.menu-reset { height: auto; min-height: 0; box-shadow: none; background: var(--background-primary, #fff); color: var(--text-muted, #686974); border-color: var(--background-modifier-border, #e4e1ee); }
+.markpage-host-editor .paper-page { color: #33343a; }
+.markpage-host-editor .markpage-host-attachment { display: block; min-height: 80px; }
+.markpage-host-editor .markpage-host-attachment iframe { width: 100%; min-height: 400px; }
+.markpage-host-editor .comments-panel, .markpage-host-editor .markpage-host-links { background: var(--background-secondary); color: var(--text-normal); }
+.markpage-host-editor .comment-card, .markpage-host-editor .comment-quote, .markpage-host-editor .reply-box textarea { background: var(--background-primary); color: var(--text-normal); }
+.markpage-host-editor .message-meta strong, .markpage-host-editor .comment-message > p, .markpage-host-editor .comment-quote p { color: var(--text-normal); }
+.markpage-host-editor .comments-panel .panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 10px; border-bottom: 1px solid var(--border); }
+.markpage-host-editor .comments-panel .panel-heading > div { display: flex; gap: 6px; align-items: center; }
+.markpage-host-editor .comments-panel .icon-button { padding: 3px; height: 26px; }
+.markpage-host-editor .comments-panel .count-badge { padding: 0 5px; color: var(--text-muted); }
+@media (max-width: 650px) {
+  .markpage-host-content.mode-split { flex-direction: column; }
+  .markpage-host-content.mode-split > * { min-height: 160px; }
+  .markpage-host-content .comments-panel, .markpage-host-links { width: 220px; flex-basis: 220px; }
+}

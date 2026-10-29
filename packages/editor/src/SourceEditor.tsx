@@ -2,7 +2,7 @@ import { useCallback, useImperativeHandle, useLayoutEffect, useRef } from 'react
 import type { CSSProperties, Ref } from 'react'
 import { trackSourceEdit } from '@markpage/core/revision'
 import type { SelectionSnapshot } from '@markpage/core/model'
-import { sourceSelectionSnapshot } from './source-selection'
+import { preserveSourceNewlines, rawOffset, sourceSelectionSnapshot, textareaOffset } from './source-selection'
 
 export interface SourceEditorHandle {
   restoreSelection: (start: number, end?: number) => void
@@ -45,9 +45,9 @@ export default function SourceEditor<Command extends string>({ ref: editorRef, c
   const reportSelection = useCallback(() => {
     const element = ref.current
     if (element && element.ownerDocument.activeElement === element && !pendingSelection.current && !composing.current) {
-      onSelection(sourceSelectionSnapshot(element))
+      onSelection(sourceSelectionSnapshot(element, value))
     }
-  }, [onSelection])
+  }, [onSelection, value])
 
   useLayoutEffect(() => {
     const element = ref.current
@@ -56,7 +56,7 @@ export default function SourceEditor<Command extends string>({ ref: editorRef, c
     if (pending) {
       pendingSelection.current = null
       element.focus({ preventScroll: true })
-      element.setSelectionRange(pending.start, pending.end)
+      element.setSelectionRange(textareaOffset(value, pending.start), textareaOffset(value, pending.end))
     }
     reportSelection()
   }, [value, reportSelection])
@@ -93,7 +93,7 @@ export default function SourceEditor<Command extends string>({ ref: editorRef, c
           if (composing.current || readOnly) return
           const id = commandForEvent?.(event.nativeEvent)
           if (!id) return
-          if (onCommand(id, sourceSelectionSnapshot(event.currentTarget))) {
+          if (onCommand(id, sourceSelectionSnapshot(event.currentTarget, value))) {
             event.preventDefault()
             event.stopPropagation()
           }
@@ -101,18 +101,18 @@ export default function SourceEditor<Command extends string>({ ref: editorRef, c
         onBeforeInput={(event) => {
           const type = (event.nativeEvent as InputEvent).inputType
           const id = type === 'historyUndo' ? 'edit.undo' : type === 'historyRedo' ? 'edit.redo' : null
-          if (id && !composing.current && !readOnly && onCommand(id, sourceSelectionSnapshot(event.currentTarget))) event.preventDefault()
+          if (id && !composing.current && !readOnly && onCommand(id, sourceSelectionSnapshot(event.currentTarget, value))) event.preventDefault()
         }}
         aria-label={label}
         onChange={(event) => {
           if (readOnly) return
-          const next = event.target.value
+          const next = preserveSourceNewlines(value, event.target.value)
           // 输入法组字过程中不改写：改写 value 会打断候选词，等上屏后再统一记修订。
           if (composing.current) {
             onChange(next)
             return
           }
-          commit(next, value, event.target.selectionStart)
+          commit(next, value, rawOffset(next, event.target.selectionStart))
         }}
         onCompositionStart={() => {
           composing.current = true
@@ -121,9 +121,9 @@ export default function SourceEditor<Command extends string>({ ref: editorRef, c
         onCompositionEnd={(event) => {
           composing.current = false
           if (readOnly) return
-          const next = event.currentTarget.value
+          const next = preserveSourceNewlines(beforeComposition.current, event.currentTarget.value)
           if (next === beforeComposition.current) return
-          commit(next, beforeComposition.current, event.currentTarget.selectionStart)
+          commit(next, beforeComposition.current, rawOffset(next, event.currentTarget.selectionStart))
         }}
       />
     </div>

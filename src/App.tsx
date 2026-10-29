@@ -1890,7 +1890,7 @@ export default function App() {
   ]
 
   return (
-    <div className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
+    <div className={`app-shell markpage-root ${focusMode ? 'focus-mode' : ''}`}>
       <header className="app-header">
         <button className="brand" onClick={() => setFocusMode(false)} title={t('brand.title')}>
           <span className="brand-mark">{t('brand.name').slice(0, 1)}</span>

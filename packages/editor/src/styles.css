@@ -1,3 +1,4 @@
+@import './document.css';
 .markpage-root.source-editor-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #202129; }
 .markpage-root.source-editor-wrap.is-compact .source-editor { padding: 20px 22px 60px; }
 .markpage-root .source-editor-meta { height: 35px; flex: 0 0 35px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #32333d; color: #777985; font-size: calc(10.5px * var(--ui-scale, 1)); letter-spacing: .12em; }

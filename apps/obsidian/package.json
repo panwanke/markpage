@@ -1,0 +1,11 @@
+{
+  "name": "@markpage/obsidian",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@markpage/core": "1.2.0",
+    "@markpage/editor": "1.2.0",
+    "@markpage/extension-obsidian": "1.2.0"
+  }
+}

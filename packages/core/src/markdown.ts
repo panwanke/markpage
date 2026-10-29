@@ -60,32 +60,61 @@ function resolveTextRange(node: Text, parent: Root | Element) {
   return null
 }
 
-function wrapTextNodes(parent: Root | Element) {
-  parent.children = parent.children.map((node) => {
+function wrapTextNodes(parent: Root | Element, source: string) {
+  parent.children = parent.children.flatMap((node) => {
     if (node.type === 'text' && parent.type === 'element' && parent.tagName !== 'code' && node.value.trim()) {
       const range = resolveTextRange(node, parent)
-      if (range) {
-        const { start, end } = range
-        const wrapper: Element = {
-          type: 'element',
-          tagName: 'span',
-          properties: {
-            className: ['md-source'],
-            dataSourceStart: start,
-            dataSourceEnd: end,
-          },
-          children: [node],
+      const mapped = (value: string, start: number, end: number): Element => ({
+        type: 'element',
+        tagName: 'span',
+        properties: {
+          className: ['md-source'],
+          dataSourceStart: start,
+          dataSourceEnd: end,
+        },
+        children: [value === node.value ? node : { type: 'text', value }],
+      })
+      if (range && source.slice(range.start, range.end) === node.value) {
+        return [mapped(node.value, range.start, range.end)]
+      }
+      // Anchor unchanged edges to this text node's own source bounds. Never
+      // search for matching words elsewhere or infer offsets through decoding.
+      if (range && node.position?.start.offset === range.start && node.position?.end.offset === range.end) {
+        const raw = source.slice(range.start, range.end)
+        const shown = node.value
+        let prefix = 0
+        while (prefix < raw.length && prefix < shown.length && raw[prefix] === shown[prefix]) prefix++
+        // A shared '&' or escaped '*' is not itself a literal source range.
+        // Keep complete encoded tokens outside the directly mapped edges.
+        const encoded = [...raw.matchAll(/&(?:#[xX][\da-fA-F]+|#\d+|[a-zA-Z][\da-zA-Z]*);|\\[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]|\r\n/g)]
+        for (const token of encoded) {
+          if (token.index < prefix && token.index + token[0].length > prefix) prefix = token.index
         }
-        return wrapper
+        const splitsPair = (value: string, at: number) => at > 0 && at < value.length
+          && /[\uD800-\uDBFF]/.test(value[at - 1]) && /[\uDC00-\uDFFF]/.test(value[at])
+        if (splitsPair(raw, prefix) || splitsPair(shown, prefix)) prefix--
+        let suffix = 0
+        while (suffix < raw.length - prefix && suffix < shown.length - prefix
+          && raw[raw.length - suffix - 1] === shown[shown.length - suffix - 1]) suffix++
+        for (const token of encoded) {
+          const boundary = raw.length - suffix
+          if (token.index < boundary && token.index + token[0].length > boundary) suffix = raw.length - token.index - token[0].length
+        }
+        if (splitsPair(raw, raw.length - suffix) || splitsPair(shown, shown.length - suffix)) suffix--
+        const parts: (Element | Text)[] = []
+        if (prefix) parts.push(mapped(shown.slice(0, prefix), range.start, range.start + prefix))
+        if (shown.length - suffix > prefix) parts.push({ type: 'text', value: shown.slice(prefix, shown.length - suffix) })
+        if (suffix) parts.push(mapped(shown.slice(shown.length - suffix), range.end - suffix, range.end))
+        return parts
       }
     }
-    if (node.type === 'element') wrapTextNodes(node)
-    return node
+    if (node.type === 'element') wrapTextNodes(node, source)
+    return [node]
   })
 }
 
 function rehypeSourceMap() {
-  return (tree: Root) => wrapTextNodes(tree)
+  return (tree: Root, file: { value: unknown }) => wrapTextNodes(tree, String(file.value))
 }
 
 // 修订标记：`~删除~` 渲染成 <del class="rev-del">，`<ins>` 加一个可点击的类名。
