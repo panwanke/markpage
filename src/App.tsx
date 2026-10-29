@@ -82,6 +82,7 @@ import {
   SPLIT_RATIO_MAX,
   SPLIT_RATIO_MIN,
   DEFAULT_SPLIT_RATIO,
+  DEFAULT_SCAN_LIMITS,
 } from './lib/storage'
 import { createDefaultLayout, openPanel, toggleSidebar } from './lib/layout'
 import {
@@ -100,6 +101,8 @@ import { MARKDOWN_EXTENSION as OPENABLE_EXTENSION } from './lib/localfs'
 import { hashContent } from './lib/hash'
 import { findAnchorElement } from './lib/anchors'
 import { useWorkspace } from './hooks/useWorkspace'
+import { useVaultBridge } from './hooks/useVaultBridge'
+import { useBridgeSave } from './hooks/useBridgeSave'
 import { useBuiltinPlugins } from './hooks/useBuiltinPlugins'
 import WorkspaceDialog from './components/WorkspaceDialog'
 import ConflictDialog from './components/ConflictDialog'
@@ -136,12 +139,14 @@ import {
   COMMANDS,
   MENU_GROUPS,
   bindingIndex,
+  bindingOf,
+  mergeCommandBindings,
   detectPlatform,
   commandForKeyEvent,
   formatBinding,
   isTextEntryTarget,
 } from './lib/shortcuts'
-import type { CommandId } from './lib/shortcuts'
+import type { AnyCommandId, CommandBindingSource } from './lib/shortcuts'
 import { setFrontmatterKeys } from './lib/frontmatter'
 import { createHistory, pushHistory, redoHistory, undoHistory } from './lib/history'
 import type { DocumentHistory } from './lib/history'
@@ -217,11 +222,27 @@ export default function App() {
   const revisions = useMemo(() => countRevisions(markdown), [markdown])
   const layout = settings.layout
   const mode = settings.editorMode
-  const keymap = settings.keymap
-  // 平台只探测一次：菜单栏与设置面板显示的键位符号要一致。
+  // 内置插件：启停、注册表版本与编辑模式。命令与模式按钮都从这里派生。
+  const {
+    editorModes,
+    plugins: builtinPlugins,
+    commands: pluginCommands,
+    renderers: registeredRenderers,
+    activeIds: activePluginIds,
+    synced: pluginsSynced,
+  } = useBuiltinPlugins({
+    enabledPluginIds: settings.enabledPluginIds,
+    getDocument: () => (activeDocument ? { id: activeDocument.id, markdown } : null),
+  })
+  const pluginCommandDefs = useMemo<CommandBindingSource[]>(() => pluginCommands.map((command) => ({
+    id: `plugin:${command.id}`, defaultBinding: command.defaultBinding ?? '',
+    labelKey: command.titleKey, title: command.title, allowWhileTyping: command.allowWhileTyping,
+  })), [pluginCommands])
+  const effective = useMemo(() => mergeCommandBindings(settings.keymap, pluginCommandDefs), [settings.keymap, pluginCommandDefs])
+  const keymap = effective.keymap
   const platform = useMemo(() => detectPlatform(), [])
-  const shortcutLabel = useCallback((id: CommandId) => formatBinding(keymap[id] ?? '', platform), [keymap, platform])
-  const keyIndex = useMemo(() => bindingIndex(keymap), [keymap])
+  const shortcutLabel = useCallback((id: AnyCommandId) => formatBinding(bindingOf(keymap, id), platform), [keymap, platform])
+  const keyIndex = useMemo(() => bindingIndex(keymap, pluginCommandDefs), [keymap, pluginCommandDefs])
   const hasSelectedText = Boolean(selection && selection.start < selection.end)
   const handleSourceSelection = useCallback((next: SelectionSnapshot) => {
     setSelection(next)
@@ -307,11 +328,24 @@ export default function App() {
     window.setTimeout(() => setToast(''), 2200)
   }, [])
 
+  const notifiedPluginConflicts = useRef(new Set<string>())
+  useEffect(() => {
+    for (const conflict of effective.conflicts) {
+      const plugin = pluginCommands.find((command) => `plugin:${command.id}` === conflict.id)
+      if (!plugin || notifiedPluginConflicts.current.has(plugin.pluginId)) continue
+      notifiedPluginConflicts.current.add(plugin.pluginId)
+      notify(t('toast.pluginShortcutConflict', { binding: formatBinding(conflict.binding), name: conflict.ownerLabelKey ? t(conflict.ownerLabelKey) : conflict.ownerTitle ?? conflict.ownerId }))
+    }
+  }, [effective.conflicts, pluginCommands, t, notify])
+
   /**
    * 工作空间会话：目录句柄、权限、写盘队列与冲突判定都在这里。
    * App 仍然是文档真相的持有者，hook 只回写 binding / diskBaseline。
    */
+  const bridgeActiveRef = useRef(false)
   const workspace = useWorkspace({
+    writesPaused: () => bridgeActiveRef.current,
+    scanLimits: settings.scanLimits,
     getDocuments: () => documentsRef.current,
     patchDocument: (id, patch) => setDocuments((current) => current.map((document) => (
       document.id === id ? { ...document, ...patch } : document
@@ -327,6 +361,16 @@ export default function App() {
     t,
   })
 
+  const bridge = useVaultBridge(() => {
+    notify(t('bridge.fallback'))
+    void workspace.refresh()
+  })
+  const { refresh: refreshBridge } = bridge
+  const bridgeSnapshot = bridge.snapshot
+  bridgeActiveRef.current = bridge.status === 'connected' || bridge.status === 'connecting'
+  const bridgeSave = useBridgeSave(documents, bridgeSnapshot, setDocuments)
+  const { isOwnUpdate } = bridgeSave
+  const [bridgeComparison, setBridgeComparison] = useState<{ id: string; content: string; revision?: string } | null>(null)
   // 解构出稳定的回调再进依赖数组：直接写 workspace.xxx 会让 lint 把整个对象当依赖。
   const { enqueueWrite, hasPendingWrites } = workspace
 
@@ -345,7 +389,7 @@ export default function App() {
    * 那个 effect 不会重跑 —— 上次关闭前没落盘的改动就会一直停在浏览器里，界面上却看不出来。
    * 所以「能不能写」一变就重新排一次（干净的文档会被 enqueueWrite 的哈希比较筛掉）。
    */
-  const writeArmKey = `${workspace.session?.id ?? ''}:${workspace.session?.writePermission ?? ''}`
+  const writeArmKey = `${workspace.session?.id ?? ''}:${workspace.session?.writePermission ?? ''}:${bridgeActiveRef.current}`
   useEffect(() => {
     documentsRef.current.forEach((document) => {
       if (document.binding) enqueueWrite(document)
@@ -355,7 +399,7 @@ export default function App() {
   // ---------- Obsidian 库：识别、目录树、链接索引、附件与嵌入 ----------
   // 会话（目录句柄 + 文件列表 + 附件句柄）由 useWorkspace 持有；这里只做「读得懂」那层，
   // 写盘一律走 workspace，不在这里另开第二条路。
-  const vaultSession = workspace.session
+  const vaultSession = bridgeSnapshot?.session ?? workspace.session
   const [vaultConfig, setVaultConfig] = useState<VaultConfig | null>(null)
   const [vaultTree, setVaultTree] = useState<VaultNode[]>([])
   const [vaultIndex, setVaultIndex] = useState<LinkIndex | null>(null)
@@ -378,7 +422,7 @@ export default function App() {
    * 建索引：可取消，进度上报状态栏与链接面板。
    * 优先丢进 Worker（几千篇的库不卡正文），Worker 起不来或中途出错就退回主线程。
    */
-  const rebuildIndex = useCallback(async (entries: LocalFileEntry[], name: string, options: { force?: boolean } = {}) => {
+  const rebuildIndex = useCallback(async (entries: LocalFileEntry[], name: string, options: { force?: boolean; limits?: typeof settings.scanLimits; truncated?: boolean } = {}) => {
     indexAbortRef.current?.abort()
     workerJobRef.current?.cancel()
     const controller = new AbortController()
@@ -386,13 +430,15 @@ export default function App() {
     // 缓存键带库标识：换库后同路径同 mtime/size 绝不能命中上一个库的索引。
     const vault = vaultFingerprint(name, entries)
     setIndexProgress({ done: 0, total: entries.length })
+    const limits = options.limits ?? DEFAULT_SCAN_LIMITS
+    const budget = { maxFileBytes: limits.noteBytes, maxBytes: limits.totalBytes, truncated: options.truncated }
     const onProgress = (done: number, total: number) => {
       if (!controller.signal.aborted) setIndexProgress({ done, total })
     }
     try {
       if (options.force) await clearVaultCache(vault)
       let index: LinkIndex
-      const job = startWorkerIndex(entries, { useCache: !options.force, vault, onProgress })
+      const job = startWorkerIndex(entries, { useCache: !options.force, vault, onProgress, ...budget })
       if (job) {
         workerJobRef.current = job
         try {
@@ -400,12 +446,12 @@ export default function App() {
         } catch {
           // Worker 不可用（句柄不可克隆 / 被 CSP 拦掉）：主线程重跑一遍，结果一样只是慢些。
           if (controller.signal.aborted) return
-          index = await buildVaultIndex(entries, { signal: controller.signal, useCache: !options.force, vault, onProgress })
+          index = await buildVaultIndex(entries, { signal: controller.signal, useCache: !options.force, vault, onProgress, ...budget })
         } finally {
           workerJobRef.current = null
         }
       } else {
-        index = await buildVaultIndex(entries, { signal: controller.signal, useCache: !options.force, vault, onProgress })
+        index = await buildVaultIndex(entries, { signal: controller.signal, useCache: !options.force, vault, onProgress, ...budget })
       }
       if (controller.signal.aborted) return
       vaultIndexRef.current = index
@@ -435,12 +481,17 @@ export default function App() {
   // 索引：扫描完（不是在扫）且确实有文件时才建，避免拿半份列表算出错的链接关系。
   useEffect(() => {
     if (!vaultSession || vaultSession.scanning || !vaultSession.files.length) return
-    void rebuildIndex(vaultSession.files, vaultSession.name)
+    if (bridgeSnapshot) {
+      vaultIndexRef.current = bridgeSnapshot.index
+      setVaultIndex(bridgeSnapshot.index)
+      return
+    }
+    void rebuildIndex(vaultSession.files, vaultSession.name, { limits: vaultSession.scanLimits, truncated: vaultSession.truncated })
     return () => {
       indexAbortRef.current?.abort()
       workerJobRef.current?.cancel()
     }
-  }, [vaultSession, rebuildIndex])
+  }, [vaultSession, rebuildIndex, bridgeSnapshot])
 
   // 附件解析器与嵌入缓存都绑在会话上：换库即 dispose，旧的 blob URL 不能跨库复用。
   useEffect(() => {
@@ -480,13 +531,18 @@ export default function App() {
   }, [])
 
   /** 当前文档在库里的路径；拖进来的单文件没有库内路径。 */
-  const activeVaultPath = activeDocument?.binding?.kind === 'workspace' ? activeDocument.binding.path : ''
+  const activeVaultPath = bridgeSnapshot
+    ? (activeDocument?.bridgeSource?.vaultId === bridgeSnapshot.vault.vaultId ? activeDocument.bridgeSource.path : '')
+    : activeDocument?.binding?.kind === 'workspace' ? activeDocument.binding.path : ''
 
   /** 打开库内文件；带锚点时等正文渲染完再滚过去并闪一下。 */
   async function openVaultPath(path: string, anchor = '') {
-    const workspaceId = workspace.session?.id
-    if (!workspaceId) return
-    await openWorkspaceFile(workspaceId, path)
+    if (bridgeSnapshot) await openBridgeFile(path)
+    else {
+      const workspaceId = workspace.session?.id
+      if (!workspaceId) return
+      await openWorkspaceFile(workspaceId, path)
+    }
     setPendingAnchor(anchor ? { path, anchor } : null)
   }
 
@@ -574,7 +630,7 @@ export default function App() {
    * 「新建笔记」命令要真的新建 —— 同名直接打开已有那篇会让人以为命令没生效。
    */
   async function createVaultNote(name: string, options: { unique?: boolean } = {}) {
-    const session = vaultSession
+    const session = bridgeSnapshot ? null : workspace.session
     if (!session) {
       notify(t('vault.noFolderHint'))
       return
@@ -627,9 +683,50 @@ export default function App() {
   async function rebuildVaultIndex() {
     if (!vaultSession) return
     embedCache?.invalidate()
-    await rebuildIndex(vaultSession.files, vaultSession.name, { force: true })
+    if (bridgeSnapshot) { await refreshBridge(); return }
+    await rebuildIndex(vaultSession.files, vaultSession.name, { force: true, limits: settings.scanLimits, truncated: vaultSession.truncated })
     notify(t('settings.vault.rebuilt'))
   }
+
+  useEffect(() => {
+    if (!bridgeSnapshot) return
+    const { vault, events, client } = bridgeSnapshot
+    let cancelled = false
+    setDocuments(current => current.map(document => {
+      if (document.binding || document.bridgeSource?.vaultId !== vault.vaultId) return document
+      let path = document.bridgeSource.path
+      for (const event of events) {
+        if (event.type === 'rename' && event.oldPath && (path === event.oldPath || path.startsWith(`${event.oldPath}/`))) path = event.path! + path.slice(event.oldPath.length)
+      }
+      return path === document.bridgeSource.path ? document : { ...document, bridgeSource: { ...document.bridgeSource, path } }
+    }))
+    const applyChanges = async () => {
+      const updates = new Map<string, { path: string; content: string; expectedHash: string; revision?: string }>()
+      for (const document of documentsRef.current) {
+        if (document.binding || document.bridgeSource?.vaultId !== vault.vaultId) continue
+        let path = document.bridgeSource.path
+        for (const event of events) {
+          if (event.type === 'rename' && event.oldPath && (path === event.oldPath || path.startsWith(`${event.oldPath}/`))) path = event.path! + path.slice(event.oldPath.length)
+        }
+        if (!vault.files.some(file => file.path === path)) continue
+        try { updates.set(document.id, { path, content: await client.readFile(path), expectedHash: document.bridgeSource.hash, revision: client.revisions.get(path) }) }
+        catch { if (!cancelled) await refreshBridge(); return }
+      }
+      if (cancelled) return
+      setDocuments(current => current.map(document => {
+        const update = updates.get(document.id)
+        if (!update || document.binding || document.bridgeSource?.vaultId !== vault.vaultId) return document
+        if (document.bridgeSource.hash !== update.expectedHash && document.markdown !== update.content) return document
+        if (hashContent(document.markdown) !== update.expectedHash && document.markdown !== update.content && !isOwnUpdate(document.id, hashContent(update.content))) return {
+          ...document, bridgeSource: { ...document.bridgeSource!, path: update.path, revision: document.bridgeSource!.revision ?? (hashContent(update.content) === update.expectedHash ? update.revision : undefined), conflict: document.bridgeSource!.conflict || hashContent(update.content) !== update.expectedHash },
+        }
+        if (document.markdown !== update.content) historyRef.current.delete(document.id)
+        return { ...document, markdown: isOwnUpdate(document.id, hashContent(update.content)) ? document.markdown : update.content, bridgeSource: { vaultId: vault.vaultId, path: update.path, hash: hashContent(update.content), revision: update.revision } }
+      }))
+    }
+    void applyChanges()
+    return () => { cancelled = true }
+  }, [bridgeSnapshot, refreshBridge, isOwnUpdate])
 
   // 切回窗口时比对一次磁盘：只挂提示，不自动重载 —— 正在标注的人不该丢选区。
   const readBoundRef = useRef(workspace.readBoundFile)
@@ -670,18 +767,6 @@ export default function App() {
     return result
   }, [workspace.session])
 
-  // 内置插件：启停、注册表版本与编辑模式。命令与模式按钮都从这里派生。
-  const {
-    editorModes,
-    plugins: builtinPlugins,
-    commands: pluginCommands,
-    renderers: registeredRenderers,
-    activeIds: activePluginIds,
-    synced: pluginsSynced,
-  } = useBuiltinPlugins({
-    enabledPluginIds: settings.enabledPluginIds,
-    getDocument: () => (activeDocument ? { id: activeDocument.id, markdown } : null),
-  })
   // 注册表按版本号缓存列表快照，所以这里的数组引用只在插件启停时变化，不会破坏 Markdown 的 memo。
   const pluginRenderers = registeredRenderers
 
@@ -709,7 +794,8 @@ export default function App() {
       } catch {
         // 存不进去也拦不住用户关页面，至少别在卸载阶段抛错。
       }
-      if (!hasPendingWrites()) return
+      const bridgePending = documentsRef.current.some(doc => doc.bridgeSource && !doc.binding && hashContent(doc.markdown) !== doc.bridgeSource.hash)
+      if (!hasPendingWrites() && !bridgePending) return
       event.preventDefault()
       event.returnValue = ''
     }
@@ -1088,6 +1174,29 @@ export default function App() {
     notify(t('toast.documentRenamed', { name: name || t('document.untitled') }))
   }
 
+  async function saveCurrentDocument() {
+    if (!activeDocument) return
+    try { saveDocuments(documentsRef.current); setSaveState('saved') }
+    catch { setSaveState('error'); notify(t('save.error')); return }
+    if (activeDocument.bridgeSource && !activeDocument.binding) {
+      if (!bridgeSnapshot?.writable) { setSettingsTab('vault'); setModal('settings'); return }
+      await bridgeSave.save(activeDocument.id)
+    } else if (activeDocument.binding) {
+      if (!(await workspace.flush(undefined, activeDocument.id))) notify(t('localfs.saveFailed'))
+    } else {
+      if (!workspace.session) await workspace.openFolder()
+      await saveDocumentToDisk(activeDocument.id)
+    }
+  }
+
+  async function compareBridgeDocument() {
+    if (!activeDocument?.bridgeSource || !bridgeSnapshot) return
+    try {
+      const content = await bridgeSnapshot.client.readFile(activeDocument.bridgeSource.path)
+      setBridgeComparison({ id: activeDocument.id, content, revision: bridgeSnapshot.client.revisions.get(activeDocument.bridgeSource.path) })
+    } catch { notify(t('bridge.save.error')) }
+  }
+
   function exportDocument(id: string) {
     const target = documents.find((document) => document.id === id)
     if (!target) return
@@ -1119,6 +1228,14 @@ export default function App() {
   /** 从磁盘重新载入：外部编辑器改过文件时用它对齐，浏览器里的改动会被覆盖。 */
   async function reloadDocument(id: string) {
     const target = documents.find((document) => document.id === id)
+    if (target?.bridgeSource && !target.binding && bridgeSnapshot?.vault.vaultId === target.bridgeSource.vaultId) {
+      try {
+        const content = await bridgeSnapshot.client.readFile(target.bridgeSource.path)
+        historyRef.current.delete(id)
+        setDocuments(current => current.map(document => document.id === id ? { ...document, markdown: content, bridgeSource: { ...target.bridgeSource!, hash: hashContent(content), revision: bridgeSnapshot.client.revisions.get(target.bridgeSource!.path), conflict: false } } : document))
+      } catch { await refreshBridge() }
+      return
+    }
     if (!target?.binding) return
     const file = await workspace.readBoundFile(target)
     if (!file) return
@@ -1281,14 +1398,17 @@ export default function App() {
    */
   /** 选一个本地文件夹：内容直接来自磁盘，改动写回原文件。 */
   async function connectFolder(preset?: FileSystemDirectoryHandle | null) {
+    bridge.disconnect()
     await workspace.openFolder(preset)
   }
 
   async function refreshFolder() {
+    if (bridgeSnapshot) { await refreshBridge(); return }
     await workspace.refresh()
   }
 
   async function disconnectFolder() {
+    bridge.disconnect()
     const activeWorkspaceId = workspace.session?.id
     await workspace.disconnect()
     if (!activeWorkspaceId) return
@@ -1306,6 +1426,7 @@ export default function App() {
 
   /** 切换工作空间：先 flush 当前根，再关掉旧根的标签（缓存与绑定保留）。 */
   async function switchWorkspace(workspaceId: string) {
+    bridge.disconnect()
     if (workspace.session?.id === workspaceId) return
     const ok = await workspace.switchWorkspace(workspaceId)
     if (!ok) return
@@ -1320,6 +1441,19 @@ export default function App() {
     })
     setSelection(null)
     setSelectionMenu(null)
+  }
+
+  async function openBridgeFile(path: string) {
+    const snapshot = bridgeSnapshot
+    if (!snapshot) return
+    const existing = documentsRef.current.find(document => !document.binding && document.bridgeSource?.vaultId === snapshot.vault.vaultId && document.bridgeSource.path === path)
+    if (existing) { openDocument(existing.id); return }
+    try {
+      const content = await snapshot.client.readFile(path)
+      const document = { ...createDocument(content, titleFromPath(path)), bridgeSource: { vaultId: snapshot.vault.vaultId, path, hash: hashContent(content), revision: snapshot.client.revisions.get(path) } }
+      setDocuments(current => [...current, document])
+      setActiveId(document.id); setSelection(null); setSelectionMenu(null)
+    } catch { await refreshBridge() }
   }
 
   /** 打开工作空间里的文件；文件属于别的根时先切根再读，绝不跨根读同一个相对路径。 */
@@ -1472,8 +1606,9 @@ export default function App() {
   }
 
   /** 命令能不能点：菜单置灰与快捷键是否拦截共用同一套判断。 */
-  function commandEnabled(id: CommandId, target = selection): boolean {
+  function commandEnabled(id: AnyCommandId, target = selection): boolean {
     if (modal) return false
+    if (id.startsWith('plugin:') && (quickSwitch !== null || activeConflict)) return false
     switch (id) {
       case 'format.bold':
       case 'format.strike':
@@ -1495,24 +1630,28 @@ export default function App() {
         return openDocuments.length > 1
       case 'edit.undo':
       case 'edit.redo':
+      case 'file.save':
       case 'file.exportDirect':
       case 'file.exportClean':
       case 'file.exportCustom':
         return Boolean(activeDocument)
       case 'file.disconnectFolder':
-        return Boolean(workspace.session)
+        return Boolean(vaultSession)
+      case 'vault.createNote':
+        return !bridgeSnapshot
       default:
         return true
     }
   }
 
-  function executeCommand(id: CommandId, target = selection) {
+  function executeCommand(id: AnyCommandId, target = selection) {
     switch (id) {
       case 'file.new': newDocument(); break
       case 'file.import': fileInputRef.current?.click(); break
       case 'file.openFolder': void connectFolder(); break
       case 'file.openRecent': setModal('workspace'); break
       case 'file.disconnectFolder': void disconnectFolder(); break
+      case 'file.save': void saveCurrentDocument(); break
       case 'file.exportDirect':
         if (!activeDocument) return
         handleExport()
@@ -1561,6 +1700,8 @@ export default function App() {
       case 'tabs.next': cycleTab(1); break
       case 'tabs.close': if (activeDocument) closeDocument(activeDocument.id); break
       case 'help.shortcuts': setSettingsTab('shortcuts'); setModal('settings'); break
+      default:
+        if (commandEnabled(id)) pluginCommands.find((command) => `plugin:${command.id}` === id)?.run()
     }
   }
 
@@ -1575,14 +1716,17 @@ export default function App() {
       const id = commandForKeyEvent(event, keyIndex)
       if (!id) return
       // 焦点在输入框里时只放行不碰正文的命令：撤销、退格、加粗交给浏览器原生行为。
-      if (!ALLOWED_WHILE_TYPING.has(id) && isTextEntryTarget(event.target)) return
+      const allowed = id.startsWith('plugin:')
+        ? pluginCommandDefs.find((command) => command.id === id)?.allowWhileTyping
+        : ALLOWED_WHILE_TYPING.has(id)
+      if (!allowed && isTextEntryTarget(event.target)) return
       if (!runtimeRef.current.enabled(id)) return
       event.preventDefault()
       runtimeRef.current.run(id)
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [keyIndex])
+  }, [keyIndex, pluginCommandDefs])
 
   // 菜单项上的键位永远取当前 keymap，改完快捷键菜单立刻跟着变。
   const tabMenuDocument = tabMenu ? documents.find((document) => document.id === tabMenu.id) : undefined
@@ -1615,14 +1759,16 @@ export default function App() {
       onSelect: () => executeCommand(command.id),
     })),
   }))
-  // 插件命令不是核心 CommandId，不能进快捷键表；给它们一个独立的菜单入口。
+  // Plugin commands share the host binding table and dispatch path.
   const pluginMenu: MenuBarMenu = {
     id: 'plugins',
     label: t('menu.plugins'),
     entries: pluginCommands.map((command) => ({
       id: command.id,
       label: command.titleKey ? t(command.titleKey) : command.title,
-      onSelect: command.run,
+      shortcut: shortcutLabel(`plugin:${command.id}`),
+      disabled: !commandEnabled(`plugin:${command.id}`),
+      onSelect: () => executeCommand(`plugin:${command.id}`),
     })),
   }
   const menus: MenuBarMenu[] = pluginCommands.length
@@ -1644,15 +1790,17 @@ export default function App() {
         <WorkspacePanel
           documents={documents}
           activeId={activeDocument?.id ?? ''}
-          activePath={activeDocument?.binding?.kind === 'workspace' ? activeDocument.binding.path : ''}
-          workspace={workspace.session
+          activePath={activeVaultPath}
+          workspace={vaultSession
             ? {
-              name: workspace.session.name,
-              writable: workspace.session.writePermission === 'granted',
-              truncated: workspace.session.truncated,
-              scanning: workspace.session.scanning,
-              invalid: workspace.session.invalid,
-              files: workspace.session.files.map((file) => ({ path: file.path, title: file.title })),
+              name: vaultSession.name,
+              bridge: Boolean(bridgeSnapshot),
+              writable: bridgeSnapshot ? bridgeSnapshot.writable : vaultSession.writePermission === 'granted',
+              truncated: vaultSession.truncated,
+              scanFileLimit: vaultSession.scanFileLimit,
+              scanning: vaultSession.scanning,
+              invalid: vaultSession.invalid,
+              files: vaultSession.files.map((file) => ({ path: file.path, title: file.title })),
               vault: workspaceVault,
             }
             : null}
@@ -1668,11 +1816,8 @@ export default function App() {
           onOpenRecent={() => setModal('workspace')}
           onRefreshFolder={refreshFolder}
           onDisconnectFolder={disconnectFolder}
-          onPermitWrite={permitFolderWrite}
-          onOpenWorkspaceFile={(path) => {
-            const workspaceId = workspace.session?.id
-            if (workspaceId) void openWorkspaceFile(workspaceId, path)
-          }}
+          onPermitWrite={bridgeSnapshot ? () => { setSettingsTab('vault'); setModal('settings') } : permitFolderWrite}
+          onOpenWorkspaceFile={(path) => { void openVaultPath(path) }}
           onSaveToDisk={saveDocumentToDisk}
           onUnbind={unbindDocument}
           onReload={reloadDocument}
@@ -1692,6 +1837,7 @@ export default function App() {
           backlinks={backlinks}
           unresolved={unresolved}
           onOpen={(path) => { void openVaultPath(path) }}
+          canCreate={!bridgeSnapshot}
           onCreate={(name) => { void createVaultNote(name) }}
         />
       ),
@@ -1865,6 +2011,7 @@ export default function App() {
                       markdown={markdown}
                       revisionMode={settings.revisionMode}
                       keymap={keymap}
+                      pluginCommands={pluginCommandDefs}
                       commitEdit={commitPluginEdit}
                       onSelection={handlePluginSelection}
                       onCommand={(id, target) => {
@@ -1918,7 +2065,12 @@ export default function App() {
           <footer className="status-bar">
             <div>
               <span className="status-save-dot" />
-              <span>{saveState === 'saved' ? t('status.saved') : t('status.syncing')}</span>
+              <span>{saveState === 'error' ? t('save.error') : saveState === 'saved' ? t('status.saved') : t('status.syncing')}</span>
+              {activeDocument?.bridgeSource && !activeDocument.binding && <>
+                <span role="status">{t(`bridge.save.${bridgeSave.stateFor(activeDocument)}`)}</span>
+                <button onClick={() => void bridgeSave.save(activeDocument.id)}>{t('cmd.save')}</button>
+                {bridgeSave.stateFor(activeDocument) === 'conflict' && <button onClick={() => void compareBridgeDocument()}>{t('bridge.compare')}</button>}
+              </>}
               <span className="status-divider">/</span>
               {activeDocument && activeVaultPath && diskChanged.includes(activeVaultPath) && (
                 <button
@@ -2030,6 +2182,25 @@ export default function App() {
           onSaveCopy={() => void workspace.resolveConflict(activeDocument.id, 'copy')}
         />
       )}
+      {bridgeComparison && <div className="modal-backdrop">
+        <section className="dialog bridge-comparison" role="dialog" aria-modal="true" aria-label={t('bridge.compare')}>
+          <h2>{t('bridge.compare')}</h2>
+          <p>{t('bridge.conflictHint')}</p>
+          <label>{t('bridge.browserDraft')}<textarea readOnly value={documents.find(doc => doc.id === bridgeComparison.id)?.markdown ?? ''} /></label>
+          <label>{t('bridge.diskVersion')}<textarea readOnly value={bridgeComparison.content} /></label>
+          <button onClick={() => { exportDocument(bridgeComparison.id) }}>{t('bridge.exportDraft')}</button>
+          <button onClick={() => {
+            const target = documents.find(doc => doc.id === bridgeComparison.id)
+            if (target?.bridgeSource && bridgeSnapshot) {
+              const content = bridgeComparison.content
+              setDocuments(current => current.map(doc => doc.id === target.id ? { ...doc, markdown: content, bridgeSource: { ...target.bridgeSource!, hash: hashContent(content), revision: bridgeComparison.revision, conflict: false } } : doc))
+              historyRef.current.delete(target.id)
+            }
+            setBridgeComparison(null)
+          }}>{t('bridge.adoptDisk')}</button>
+          <button onClick={() => setBridgeComparison(null)}>{t('bridge.keepDraft')}</button>
+        </section>
+      </div>}
       {modal === 'settings' && <SettingsModal
         config={config}
         userName={settings.userName}
@@ -2037,7 +2208,9 @@ export default function App() {
         uiFont={settings.uiFont}
         uiScale={settings.uiScale}
         docFont={settings.docFont}
-        keymap={keymap}
+        keymap={settings.keymap}
+        pluginCommands={pluginCommandDefs}
+        bindingConflicts={effective.conflicts}
         plugins={builtinPlugins.map((plugin) => ({
           id: plugin.id,
           name: plugin.name,
@@ -2050,6 +2223,19 @@ export default function App() {
         onLocale={(locale) => updateSettings({ locale })}
         onAppearance={(patch) => updateSettings(patch)}
         onKeymap={(next) => updateSettings({ keymap: next })}
+        bridgeStatus={bridge.status}
+        bridgeWriteAccess={bridgeSnapshot?.writeAccess}
+        bridgeName={bridgeSnapshot?.vault.name}
+        bridgeError={bridge.error}
+        onConnectBridge={(port, token) => { void (async () => {
+          if (!bridgeSnapshot && hasPendingWrites() && !(await workspace.flush())) { notify(t('localfs.saveFailed')); return }
+          await bridge.connect(port, token)
+        })() }}
+        onDisconnectBridge={bridge.disconnect}
+        scanLimits={settings.scanLimits}
+        appliedScanLimits={bridgeSnapshot ? undefined : workspace.session?.scanLimits}
+        onScanLimits={(scanLimits) => updateSettings({ scanLimits })}
+        onRescan={() => { void workspace.refresh() }}
         obsidianSyntax={settings.obsidianSyntax}
         watchDisk={settings.watchDisk}
         indexStatus={indexProgress

@@ -18,13 +18,14 @@ interface LinksPanelProps {
   unresolved: string[]
   onOpen: (path: string) => void
   onCreate: (name: string) => void
+  canCreate?: boolean
 }
 
 /**
  * 链接面板：上面是「谁引用了我」，下面是「我引用了但找不到的」。
  * 两块都要区分「索引还没建好」与「确实为空」，否则用户会以为功能坏了。
  */
-export default function LinksPanel({ inVault, progress, partial = false, backlinks, unresolved, onOpen, onCreate }: LinksPanelProps) {
+export default function LinksPanel({ inVault, progress, partial = false, canCreate = true, backlinks, unresolved, onOpen, onCreate }: LinksPanelProps) {
   const { t } = useI18n()
   const indexing = Boolean(progress)
 
@@ -60,7 +61,7 @@ export default function LinksPanel({ inVault, progress, partial = false, backlin
               <strong>{name}</strong>
               <small>{t('links.unresolved', { name })}</small>
             </span>
-            <button className="link-create" onClick={() => onCreate(name)}>{t('links.createNote')}</button>
+            <button className="link-create" disabled={!canCreate} onClick={() => onCreate(name)}>{t('links.createNote')}</button>
           </div>
         ))}
       </div>

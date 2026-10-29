@@ -10,10 +10,12 @@ import type { VaultNode } from '../../lib/vault'
 import type { DiskState, MarkdownDocument } from '../../types'
 
 export interface WorkspaceView {
+  bridge?: boolean
   name: string
   writable: boolean
   /** 文件数触顶被截断：列表不完整，要在界面上说清楚。 */
   truncated?: boolean
+  scanFileLimit?: number
   scanning?: boolean
   /** 目录已不可访问（被移动 / 删除 / 权限撤销）。 */
   invalid?: boolean
@@ -130,7 +132,7 @@ export default function WorkspacePanel({
             <strong title={workspace.name}>{workspace.name}</strong>
             {workspace.vault && !workspace.vault.inferred && <span className="local-folder-vault">Obsidian</span>}
             <span className={`local-folder-badge ${workspace.writable ? 'is-writable' : ''}`}>
-              {workspace.writable ? t('localfs.writable') : t('localfs.readonly')}
+              {workspace.bridge ? t(workspace.writable ? 'bridge.access.granted' : 'bridge.badgeReadonly') : workspace.writable ? t('localfs.writable') : t('localfs.readonly')}
             </span>
             <button title={t('localfs.refresh')} aria-label={t('localfs.refresh')} onClick={onRefreshFolder}><RefreshCw size={13} /></button>
             <button title={t('localfs.disconnect')} aria-label={t('localfs.disconnect')} onClick={onDisconnectFolder}><X size={13} /></button>
@@ -138,7 +140,7 @@ export default function WorkspacePanel({
           {workspace.invalid && <p className="local-file-empty is-warning">{t('localfs.scanFailed', { name: workspace.name })}</p>}
           {!workspace.writable && !workspace.invalid && (
             <button className="local-folder-permit" onClick={onPermitWrite}>
-              <ShieldCheck size={13} />{t('localfs.permit')}
+              <ShieldCheck size={13} />{t(workspace.bridge ? 'bridge.configureWrite' : 'localfs.permit')}
             </button>
           )}
           {workspace.scanning && <p className="local-file-empty">{t('localfs.scanning')}</p>}
@@ -168,7 +170,7 @@ export default function WorkspacePanel({
             <p className="local-file-empty">{t('vault.attachments', { count: workspace.vault.assetCount })}</p>
           )}
           {workspace.truncated && !workspace.scanning && (
-            <p className="local-file-empty">{t('localfs.truncated', { count: workspace.files.length })}</p>
+            <p className="local-file-empty">{t('localfs.truncated', { count: workspace.scanFileLimit ?? workspace.files.length })}</p>
           )}
         </div>
       )}

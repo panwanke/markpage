@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ALLOWED_WHILE_TYPING,
+  bindingOf, mergeCommandBindings, isValidPluginBinding,
   COMMANDS,
   DEFAULT_KEYMAP,
   bindingIndex,
@@ -177,4 +178,54 @@ describe('custom shortcut regression cases', () => {
     expect(isValidBinding('Mod+nonsense')).toBe(false)
     expect(isValidBinding('Mod+B+C')).toBe(false)
   })
+})
+
+describe('plugin command bindings', () => {
+  const a = { id: 'plugin:a' as const, title: 'A', defaultBinding: 'Mod+Shift+K' }
+  const b = { id: 'plugin:b' as const, title: 'B', defaultBinding: 'Mod+Shift+K' }
+  it('preserves valid overrides and explicit clears for disabled plugins', () => {
+    const map = normalizeKeymap({ 'plugin:a': 'ctrl+alt+9', 'plugin:b': '', 'plugin:bad': 'Mod+Bogus', 'plugin:reserved': 'Mod+N' })
+    expect(map['plugin:a']).toBe('Mod+Alt+9')
+    expect(map['plugin:b']).toBe('')
+    expect(map['plugin:bad']).toBeUndefined()
+    expect(map['plugin:reserved']).toBeUndefined()
+    expect(bindingOf(map, 'plugin:missing')).toBe('')
+  })
+  it('derives defaults without mutating overrides and keeps the first owner', () => {
+    const input = { ...DEFAULT_KEYMAP }
+    const merged = mergeCommandBindings(input, [a, b])
+    expect(merged.keymap['plugin:a']).toBe(a.defaultBinding)
+    expect(merged.keymap['plugin:b']).toBe('')
+    expect(merged.conflicts[0]).toMatchObject({ id: b.id, ownerId: a.id, ownerTitle: 'A' })
+    expect(input).toEqual(DEFAULT_KEYMAP)
+    expect(bindingIndex(merged.keymap, [a, b]).get(a.defaultBinding)).toBe(a.id)
+    expect(findConflict(merged.keymap, b.id, a.defaultBinding, [a, b])?.title).toBe('A')
+  })
+  it('respects overrides and clears across deactivation and reactivation', () => {
+    const overrides = { ...DEFAULT_KEYMAP, 'plugin:a': 'Mod+Alt+9', 'plugin:b': '' }
+    expect(bindingIndex(mergeCommandBindings(overrides, []).keymap).has('Mod+Alt+9')).toBe(false)
+    const enabled = mergeCommandBindings(overrides, [a, b])
+    expect(enabled.keymap['plugin:a']).toBe('Mod+Alt+9')
+    expect(enabled.keymap['plugin:b']).toBe('')
+    expect(enabled.conflicts).toEqual([])
+  })
+  it('keeps core defaults ahead of plugin defaults and rejects invalid declarations', () => {
+    const merged = mergeCommandBindings(DEFAULT_KEYMAP, [{ ...a, defaultBinding: 'Mod+B' }, { ...b, defaultBinding: 'Mod+N' }])
+    expect(merged.conflicts[0].ownerId).toBe('format.bold')
+    expect(merged.keymap[a.id]).toBe('')
+    expect(merged.keymap[b.id]).toBe('')
+    expect(isValidPluginBinding('Space')).toBe(false)
+  })
+  it('lets explicit plugin overrides take precedence over core defaults', () => {
+    const merged = mergeCommandBindings({ ...DEFAULT_KEYMAP, 'plugin:a': 'Mod+B' }, [a])
+    expect(bindingIndex(merged.keymap, [a]).get('Mod+B')).toBe(a.id)
+    expect(merged.keymap['format.bold']).toBe('')
+  })
+})
+
+it('migrates the former Ctrl+S export default and retains explicit save overrides', () => {
+  const migrated = normalizeKeymap({ 'file.exportDirect': 'Mod+S' })
+  expect(bindingIndex(migrated).get('Mod+S')).toBe('file.save')
+  expect(migrated['file.exportDirect']).toBe('')
+  expect(normalizeKeymap({ 'file.save': '', 'file.exportDirect': 'Mod+S' })['file.exportDirect']).toBe('Mod+S')
 })

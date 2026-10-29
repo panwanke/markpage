@@ -1,7 +1,7 @@
 import type {
   MarkPagePlugin,
   MarkPagePluginAPI,
-  PluginCommand,
+  RegisteredPluginCommand,
   PluginEditorMode,
   PluginTreeRenderer,
 } from './types'
@@ -13,7 +13,7 @@ export interface RegisteredRenderer {
 }
 
 interface PluginRecord {
-  commands: Map<string, PluginCommand>
+  commands: Map<string, RegisteredPluginCommand>
   renderers: Map<string, PluginTreeRenderer>
   editorModes: Set<string>
   disposers: Array<() => void>
@@ -27,7 +27,7 @@ interface PluginRecord {
  * 比「插件没生效」更难查。版本号在每次变更时自增，宿主据此重渲染。
  */
 export class PluginRegistry {
-  private commands = new Map<string, PluginCommand>()
+  private commands = new Map<string, RegisteredPluginCommand>()
   private renderers = new Map<string, PluginTreeRenderer>()
   private editorModes = new Map<string, PluginEditorMode>()
   private plugins = new Map<string, PluginRecord>()
@@ -36,7 +36,7 @@ export class PluginRegistry {
   /** 快照跟着版本号失效，见 `snapshot()`。 */
   private snapshotVersion = -1
   private snapshots: {
-    commands: PluginCommand[]
+    commands: RegisteredPluginCommand[]
     renderers: RegisteredRenderer[]
     editorModes: PluginEditorMode[]
   } = { commands: [], renderers: [], editorModes: [] }
@@ -94,13 +94,16 @@ export class PluginRegistry {
     }
     const api: MarkPagePluginAPI = {
       version: PLUGIN_API_VERSION,
-      registerCommand: (command) => {
+      registerCommand: (definition) => {
+        const command = { ...definition, pluginId: plugin.id }
         this.commands.set(command.id, command)
         record.commands.set(command.id, command)
+        this.bump()
         const dispose = () => {
           // 两个插件注册同一个 id 时，后注册的拥有当前实现；先停用的那个不能顺手删掉它。
           if (this.commands.get(command.id) === command) this.commands.delete(command.id)
           record.commands.delete(command.id)
+          this.bump()
         }
         record.disposers.push(dispose)
         return dispose

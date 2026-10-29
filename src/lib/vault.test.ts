@@ -199,3 +199,28 @@ describe('buildVaultIndex', () => {
     expect(index.headings.get('B.md')).toBeUndefined()
   })
 })
+
+describe('custom scan and index limits', () => {
+  it('honors vault depth and file limits', async () => {
+    const root = directory({ 'A.md': fileHandle('A.md', ''), sub: directory({ 'B.md': fileHandle('B.md', '') }) })
+    const shallow = await scanVault(root, { config: null, maxDepth: 1 })
+    expect(shallow.entries.map(file => file.path)).toEqual(['A.md'])
+    const capped = await scanVault(root, { config: null, maxFiles: 1 })
+    expect(capped.truncated).toBe(true)
+    expect(capped.entries).toHaveLength(1)
+    expect((await scanVault(root, { config: null, maxDepth: 2 })).entries).toHaveLength(2)
+  })
+  it('keeps oversized notes addressable while marking content as partial', async () => {
+    const entries = [entry('A.md', '# Heading'), entry('B.md', '# B')]
+    const index = await buildVaultIndex(entries, { useCache: false, maxFileBytes: 4 })
+    expect(index.partial).toBe(true)
+    expect(index.byPath.get('a.md')).toBe('A.md')
+    expect(index.headings.has('A.md')).toBe(false)
+    expect(index.headings.get('B.md')).toEqual(['B'])
+    expect((await buildVaultIndex(entries, { useCache: false, maxFileBytes: 100 })).partial).toBe(false)
+  })
+})
+
+it('marks a scan-truncated index partial even when every listed note can be read', async () => {
+  expect((await buildVaultIndex([entry('A.md', '# A')], { useCache: false, truncated: true })).partial).toBe(true)
+})

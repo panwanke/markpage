@@ -1,11 +1,11 @@
 import { useEffect, useImperativeHandle, useRef } from 'react'
 import type { Ref } from 'react'
-import { EditorState } from '@codemirror/state'
+import { EditorState, Prec } from '@codemirror/state'
 import { EditorView, drawSelection, highlightActiveLine, keymap as cmKeymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { markdown as markdownLanguage } from '@codemirror/lang-markdown'
 import { bindingIndex, commandForKeyEvent, SOURCE_COMMANDS } from '../../lib/shortcuts'
-import type { CommandId, Keymap } from '../../lib/shortcuts'
+import type { AnyCommandId, CommandBindingSource, Keymap } from '../../lib/shortcuts'
 import type { PluginEditorHandle, PluginEditorProps } from '../types'
 import { livePreviewDecorations } from './decorations'
 import { clampOffset, selectionSnapshot } from './selection'
@@ -29,6 +29,7 @@ export default function LivePreviewEditor({
   markdown,
   revisionMode,
   keymap,
+  pluginCommands,
   commitEdit,
   onSelection,
   onCommand,
@@ -36,21 +37,21 @@ export default function LivePreviewEditor({
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   /** 同步用的最新 props：EditorView 的监听器只挂一次，闭包里的值会过期。 */
-  const propsRef = useRef({ markdown, revisionMode, keymap, commitEdit, onSelection, onCommand })
+  const propsRef = useRef({ markdown, revisionMode, keymap, pluginCommands, commitEdit, onSelection, onCommand })
   useEffect(() => {
-    propsRef.current = { markdown, revisionMode, keymap, commitEdit, onSelection, onCommand }
+    propsRef.current = { markdown, revisionMode, keymap, pluginCommands, commitEdit, onSelection, onCommand }
   })
   /** 宿主回写或选区恢复引起的 transaction，不该再回传给宿主。 */
   const syncingRef = useRef(false)
   const composingRef = useRef(false)
   const beforeCompositionRef = useRef('')
-  const keyIndexRef = useRef<{ keymap: Keymap; index: Map<string, CommandId> } | null>(null)
+  const keyIndexRef = useRef<{ keymap: Keymap; sources?: readonly CommandBindingSource[]; index: Map<string, AnyCommandId> } | null>(null)
 
   function commandIndex() {
     const current = keyIndexRef.current
-    if (current && current.keymap === propsRef.current.keymap) return current.index
-    const index = bindingIndex(propsRef.current.keymap)
-    keyIndexRef.current = { keymap: propsRef.current.keymap, index }
+    if (current && current.keymap === propsRef.current.keymap && current.sources === propsRef.current.pluginCommands) return current.index
+    const index = bindingIndex(propsRef.current.keymap, propsRef.current.pluginCommands)
+    keyIndexRef.current = { keymap: propsRef.current.keymap, sources: propsRef.current.pluginCommands, index }
     return index
   }
 
@@ -127,7 +128,7 @@ export default function LivePreviewEditor({
               if (!composingRef.current && !syncingRef.current) propsRef.current.onSelection(selectionSnapshot(view))
             }
           }),
-          EditorView.domEventHandlers({
+          Prec.highest(EditorView.domEventHandlers({
             compositionstart() {
               composingRef.current = true
               beforeCompositionRef.current = view.state.doc.toString()
@@ -140,13 +141,15 @@ export default function LivePreviewEditor({
             },
             keydown(event) {
               const id = commandForKeyEvent(event, commandIndex())
-              if (!id || !SOURCE_COMMANDS.has(id)) return false
+              if (!id) return false
+              const plugin = propsRef.current.pluginCommands?.find((command) => command.id === id)
+              if (!SOURCE_COMMANDS.has(id) && !plugin?.allowWhileTyping) return false
               const snapshot = selectionSnapshot(view)
               if (!propsRef.current.onCommand(id, snapshot)) return false
               event.preventDefault()
               return true
             },
-          }),
+          })),
         ],
       }),
     })

@@ -121,3 +121,13 @@ describe('插件注册表', () => {
     expect(registry.listRenderers().map((entry) => entry.tagName)).toEqual(['comment'])
   })
 })
+
+it('keeps one command and its current owner when ids collide', () => {
+  const registry = new PluginRegistry()
+  const shared = (id: string): MarkPagePlugin => ({ ...makePlugin(id), activate: api => { api.registerCommand({ id: 'shared', title: id, run: () => {} }) } })
+  registry.activate(shared('first'), () => null)
+  registry.activate(shared('second'), () => null)
+  expect(registry.listCommands()).toMatchObject([{ id: 'shared', pluginId: 'second', title: 'second' }])
+  registry.deactivate('first')
+  expect(registry.listCommands()).toHaveLength(1)
+})

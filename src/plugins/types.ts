@@ -1,7 +1,7 @@
 import type { ComponentType, Ref } from 'react'
 import type { Root } from 'hast'
 import type { MessageKey } from '../i18n'
-import type { CommandId, Keymap } from '../lib/shortcuts'
+import type { AnyCommandId, CommandBindingSource, Keymap } from '../lib/shortcuts'
 import type { SelectionSnapshot } from '../types'
 
 export interface PluginCommand {
@@ -9,8 +9,12 @@ export interface PluginCommand {
   title: string
   /** 宿主已有译文时用它，避免内置插件把中文标题带进英文界面。 */
   titleKey?: MessageKey
+  defaultBinding?: string
+  allowWhileTyping?: boolean
   run: () => void
 }
+
+export type RegisteredPluginCommand = PluginCommand & { pluginId: string }
 
 export interface PluginRendererContext {
   documentId: string
@@ -31,11 +35,12 @@ export interface PluginEditorProps {
   markdown: string
   revisionMode: boolean
   keymap: Keymap
+  pluginCommands?: readonly CommandBindingSource[]
   /** 提交一次编辑：返回实际写入的 Markdown 与 caret（修订改写可能改变长度）。 */
   commitEdit: (next: string, caret: number, trackRevision: boolean) => { markdown: string; caret: number }
   onSelection: (selection: SelectionSnapshot | null) => void
   /** 转交命令给宿主；返回 false 表示这条命令当前不可用。 */
-  onCommand: (id: CommandId, selection: SelectionSnapshot) => boolean
+  onCommand: (id: AnyCommandId, selection: SelectionSnapshot) => boolean
 }
 
 export interface PluginEditorHandle {
@@ -61,7 +66,7 @@ export interface PluginEditorMode {
 }
 
 export interface MarkPagePluginAPI {
-  version: '1.1'
+  version: '1.2'
   registerCommand: (command: PluginCommand) => () => void
   registerRenderer: (tagName: string, renderer: PluginTreeRenderer) => () => void
   /** 注册一个编辑模式；停用插件时宿主会一并卸载它。 */
@@ -77,4 +82,4 @@ export interface MarkPagePlugin {
   activate: (api: MarkPagePluginAPI) => void | (() => void)
 }
 
-export const PLUGIN_API_VERSION = '1.1' as const
+export const PLUGIN_API_VERSION = '1.2' as const

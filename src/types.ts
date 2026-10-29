@@ -34,6 +34,8 @@ export interface MarkdownDocument {
   binding?: DocumentBinding
   /** 写盘与冲突判定用的磁盘基准。 */
   diskBaseline?: DiskBaseline
+  /** A read origin, never authority to write a disk path. */
+  bridgeSource?: { vaultId: string; path: string; hash: string; revision?: string; conflict?: boolean }
 }
 
 export type PaperSize = 'A4' | 'Letter'
@@ -134,6 +136,15 @@ export interface ExportConfig {
   textColors: Record<string, ExportColorMapping>
 }
 
+export interface ScanLimits {
+  folderDepth: number
+  folderFiles: number
+  vaultDepth: number
+  vaultFiles: number
+  noteBytes: number
+  totalBytes: number
+}
+
 export interface WorkspaceSettings {
   userName: string
   /** 界面语言（LOCALES 的 id）。 */
@@ -161,5 +172,6 @@ export interface WorkspaceSettings {
   obsidianSyntax: boolean
   /** 切回窗口时比对一次磁盘，被外部改过只挂徽标、不自动重载。 */
   watchDisk: boolean
+  scanLimits: ScanLimits
   exportConfig: ExportConfig
 }

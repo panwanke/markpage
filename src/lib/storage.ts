@@ -7,7 +7,7 @@ import { createDefaultLayout, normalizeLayout } from './layout'
 import { getPageConfig, UNTITLED_TITLE } from './markdown'
 import { DEFAULT_KEYMAP, normalizeKeymap } from './shortcuts'
 import { DEFAULT_ENABLED_PLUGIN_IDS } from '../plugins/ids'
-import type { DiskBaseline, DocumentBinding, EditorMode, MarkdownDocument, WorkspaceSettings } from '../types'
+import type { DiskBaseline, DocumentBinding, EditorMode, MarkdownDocument, ScanLimits, WorkspaceSettings } from '../types'
 
 const DOCUMENTS_KEY = 'markpage.documents.v1'
 const SETTINGS_KEY = 'markpage.settings.v1'
@@ -21,6 +21,27 @@ export function clampSplitRatio(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, value))
     : DEFAULT_SPLIT_RATIO
+}
+
+export const DEFAULT_SCAN_LIMITS: ScanLimits = {
+  folderDepth: 4, folderFiles: 2000, vaultDepth: 8, vaultFiles: 5000,
+  noteBytes: 512 * 1024, totalBytes: 64 * 1024 * 1024,
+}
+
+export const SCAN_LIMIT_RANGES: Record<keyof ScanLimits, readonly [number, number]> = {
+  folderDepth: [2, 16], folderFiles: [200, 20000], vaultDepth: [2, 16], vaultFiles: [500, 50000],
+  noteBytes: [64 * 1024, 8 * 1024 * 1024], totalBytes: [8 * 1024 * 1024, 512 * 1024 * 1024],
+}
+
+export function normalizeScanLimits(raw: unknown): ScanLimits {
+  const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const result = { ...DEFAULT_SCAN_LIMITS }
+  for (const key of Object.keys(result) as (keyof ScanLimits)[]) {
+    const value = source[key]
+    const [min, max] = SCAN_LIMIT_RANGES[key]
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) result[key] = Math.min(max, Math.max(min, Math.floor(value)))
+  }
+  return result
 }
 
 export const DEFAULT_SETTINGS: WorkspaceSettings = {
@@ -40,6 +61,7 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   enabledPluginIds: [...DEFAULT_ENABLED_PLUGIN_IDS],
   obsidianSyntax: true,
   watchDisk: true,
+  scanLimits: { ...DEFAULT_SCAN_LIMITS },
   exportConfig: CUSTOM_EXPORT_DEFAULT,
 }
 
@@ -77,6 +99,14 @@ function normalizeBinding(raw: unknown): DocumentBinding | undefined {
     return { kind: 'external', handleKey: source.handleKey, path }
   }
   return undefined
+}
+
+function normalizeBridgeSource(raw: unknown): MarkdownDocument['bridgeSource'] {
+  if (!raw || typeof raw !== 'object') return undefined
+  const source = raw as Record<string, unknown>
+  if (typeof source.vaultId !== 'string' || !source.vaultId || typeof source.hash !== 'string' || !source.hash || typeof source.path !== 'string') return undefined
+  if (!source.path || /[\\:\0]/.test(source.path) || source.path.split('/').some(part => !part || part === '..' || part.startsWith('.'))) return undefined
+  return { vaultId: source.vaultId, path: source.path, hash: source.hash, ...(typeof source.revision === 'string' && /^[a-f0-9]{64}$/.test(source.revision) ? { revision: source.revision } : {}), ...(source.conflict === true ? { conflict: true } : {}) }
 }
 
 function normalizeBaseline(raw: unknown): DiskBaseline | undefined {
@@ -128,6 +158,7 @@ export function loadDocuments() {
             ...rest,
             name: normalizeDocumentName(rest.name),
             binding: normalizeBinding(rest.binding),
+            bridgeSource: normalizeBridgeSource(rest.bridgeSource),
             diskBaseline: normalizeBaseline(rest.diskBaseline),
           } as unknown as MarkdownDocument
         })
@@ -167,6 +198,7 @@ export function loadSettings(): WorkspaceSettings {
       // 新增字段默认开启：老版本设置里没有它们，缺省不能变成「悄悄关掉」。
       obsidianSyntax: merged.obsidianSyntax !== false,
       watchDisk: merged.watchDisk !== false,
+      scanLimits: normalizeScanLimits(raw.scanLimits),
     }
   } catch {
     return DEFAULT_SETTINGS

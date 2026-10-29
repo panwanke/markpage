@@ -45,7 +45,7 @@ MarkPage turns a `.md` file into a paginated, printable document you can mark up
 | Internationalisation | Chinese / English with instant switching; one flat key table per language, adding a language means adding one file and registering it, and type checking guarantees no missing keys |
 | Appearance | UI font family and scale (115% by default, sidebar, status bar and comment panel scale with it), body font family; saved locally |
 | Three export modes | **Direct** takes everything as-is; **clean** strips comment anchors, comment blocks and highlight colours; **custom** maps colours to your own classes / inline styles, with live preview |
-| Plugin API | Command, renderer, editor-mode, document-access and lifecycle APIs (API 1.1); built-in plugins can be switched on and off in Settings → Plugins, and disabling one removes its commands, renderers and editor modes. Plugin commands get their own **Plugins** menu (they are outside the remappable core keymap), and tree renderers run on a copy of the parsed tree, so a plugin can neither corrupt the render cache nor take the whole document down with an exception |
+| Plugin API | Command, renderer, editor-mode, document-access and lifecycle APIs (API 1.2); built-in plugins can be switched on and off in Settings → Plugins, and disabling one removes its commands, renderers and editor modes. Plugin commands get their own **Plugins** menu (they share shortcut settings and conflict detection with core commands), and tree renderers run on a copy of the parsed tree, so a plugin can neither corrupt the render cache nor take the whole document down with an exception |
 | Live editing | Optional built-in plugin: a single continuous CodeMirror 6 view that hides Markdown markers on non-active lines and shows them on the cursor line; Markdown stays the single source of truth, IME-safe, off by default |
 
 Page setup is written into the YAML frontmatter; user name, view toggles, language, sidebar layout and appearance (font / scale) live in browser storage. UI scale is applied through the `--ui-scale` CSS variable, sidebar and comment-panel widths follow `--ui-width` (relative to the 115% default), and body text uses `--doc-font`, so app chrome never interferes with the document's own font size and line height.
@@ -68,7 +68,7 @@ Commands live in `COMMANDS` in `src/lib/shortcuts.ts`: one command = id + group 
 
 | Group | Default bindings |
 | :--- | :--- |
-| File | New `Ctrl/⌘+Alt+N` · Import `+Alt+O` · Export directly `+S` · Export clean `+Shift+S` · Export custom `+Alt+S` · Print `+P` · Settings `+,` |
+| File | New `Ctrl/⌘+Alt+N` · Import `+Alt+O` · Save current file `+S` · Direct export via File menu · Export clean `+Shift+S` · Export custom `+Alt+S` · Print `+P` · Settings `+,` |
 | Edit | Undo `+Z` · Redo `+Shift+Z` (`+Y` also works) · Delete selection `Delete` |
 | Format | Bold `+B` · Strikethrough `+Shift+X` · Highlight `+Shift+H` · Inline code `+Shift+C` · Clear formatting `+\` · Comment `+Alt+M` |
 | Revision | Toggle revision `+Shift+R` · Mark deletion `+Alt+D` · Insert / replace `+Alt+I` · Accept all `+Alt+Enter` · Reject all `+Alt+Backspace` |
@@ -113,7 +113,7 @@ Chromium also returns a real handle on drop (`getAsFileSystemHandle()`), so a dr
 
 - One workspace is mounted at a time. Switching first flushes pending writes; if a write still fails you get a single confirmation: cancel to stay and fix it, or continue and keep that change in the browser only.
 - Recent workspaces and up to 20 recent files (across workspaces, deduplicated by `workspaceId + path`) are listed in the same dialog. Jumping to a file from another workspace switches the root first, then opens it.
-- A plain folder scan collects at most 2000 files and 4 levels of depth; an Obsidian vault gets 5000 files and 8 levels. Either way, hitting the cap reports "showing the first N" instead of pretending the list is complete.
+- By default, a plain folder scan collects at most 2000 files and 4 levels of depth; an Obsidian vault gets 5000 files and 8 levels. These limits are configurable in Settings. Either way, hitting the cap reports "showing the first N" instead of pretending the list is complete.
 - Directory handles live in IndexedDB and are restored on the next page load, but write permission is only **queried** at that point, not requested: when it has expired the panel shows an "authorise writing" button. A read-only root shows a read-only state instead of silently failing.
 - Edits are written back per document after a 600 ms debounce, one write at a time per document. A failed write (permission revoked, file deleted) keeps the browser copy and reports it **once** — the state stays on the failed document until a later write succeeds, so a dead path cannot turn into a stream of toasts. Body text is never lost.
 - Writes that were still queued when the page closed are re-queued as soon as the workspace is restored (or as soon as write permission is granted again) — the quiet 600 ms window cannot hide an unwritten change behind a reload.
@@ -156,9 +156,33 @@ Three panels and one dialog complete the loop:
 
 **Write-back.** Markdown stays the single source of truth, and MarkPage never rewrites a file wholesale. Page settings touch only the keys it owns (`title` / `header` / `footer` / `paper` / `fontSize` / `lineHeight`), edited line by line: key order, comments, quoting style and CRLF line endings survive, and invalid YAML is left untouched instead of being re-serialised. Before every write the file's mtime and size are compared with what was read; if another program changed it, the write stops and the same conflict dialog as everywhere else appears — *use the disk version* or *keep my changes as a copy*. There is deliberately no overwrite exit: automatic writing stays paused until you choose. The write itself goes through a writable stream that only replaces the file on `close()`, so a page that dies mid-write leaves the original file intact, and the unsaved change stays in the browser copy and is re-queued on the next load.
 
-Vaults are scanned to 8 levels and 5000 files, indexing reads at most 512 KB per note and 64 MB in total, and caches results in IndexedDB keyed by mtime + size, so reconnecting a large vault is fast. A note skipped by either budget is cached as *incomplete* rather than as an empty file, so the "index is incomplete" warning survives a reconnect instead of a partial index quietly passing for a complete one. Indexing runs in a Web Worker and falls back to the main thread wherever Workers are unavailable or blocked. Settings → Obsidian toggles the syntax layer and external-change detection, and can rebuild the index.
+By default, vaults are scanned to 8 levels and 5000 files, indexing reads at most 512 KB per note and 64 MB in total, and caches results in IndexedDB keyed by mtime + size, so reconnecting a large vault is fast. A note skipped by either budget is cached as *incomplete* rather than as an empty file, so the "index is incomplete" warning survives a reconnect instead of a partial index quietly passing for a complete one. Indexing runs in a Web Worker and falls back to the main thread wherever Workers are unavailable or blocked. Settings → Obsidian toggles the syntax layer and external-change detection, and can rebuild the index.
 
 Not supported, by design: community plugin syntax (Dataview, Templater, Excalidraw), `.canvas`, the graph view, publish / sync, and renaming or deleting notes from inside MarkPage — renaming breaks every link pointing at the note, so it belongs in Obsidian, which can update them.
+
+## Plugin shortcuts (API 1.2)
+
+Plugin commands appear in **Settings → Shortcuts → Plugins** and in the Plugins menu with their effective binding. API 1.2 adds optional `defaultBinding` and `allowWhileTyping`; existing 1.1 plugins continue to work without changes.
+
+```ts
+api.registerCommand({
+  id: 'toggle-panel', // Globally unique; kebab-case, without a plugin: prefix.
+  title: 'Toggle panel',
+  defaultBinding: 'Mod+Shift+K',
+  allowWhileTyping: false,
+  run: () => togglePanel(),
+})
+```
+
+Use the host syntax `Mod+Alt+Shift+Key`; `Mod` becomes Command on macOS and Ctrl elsewhere. Modifier aliases include Ctrl/Cmd/Meta and Alt/Option. Use uppercase letters or DOM named keys (`Enter`, `ArrowLeft`, `F1`–`F12`, etc.). Bare letters and Space are invalid. A binding needs Mod/Alt or a non-typing named key. Browser-reserved `Mod+N`, `Mod+T`, `Mod+W`, `Mod+1`–`Mod+9` are rejected. Invalid defaults are visibly unbound.
+
+User overrides take priority over core defaults, then plugin defaults in registration order. Conflicting plugin defaults remain unbound; settings and a once-per-plugin session notice name the owner. Defaults are derived at runtime and never saved as user choices. Recording a new binding checks both core and plugin commands; Backspace/Delete clears it, Escape cancels, and per-row reset removes the override. An explicit empty binding survives reload. Disabling a plugin keeps its saved override; reset-all clears plugin overrides, including orphaned commands. Duplicate command ids retain the registry's single last-registered implementation. Commands do not run during shortcut recording or a modal, and require `allowWhileTyping: true` to run inside text inputs or Live Editing. Plugins should not install their own keyboard listeners.
+
+## Scan budgets and the optional Obsidian bridge
+
+**Settings → Obsidian → Scan and index limits (advanced)** controls six persisted limits. Defaults: ordinary folders 4 levels / 2000 files; vaults 8 levels / 5000 files; index 512 KB per note / 64 MB total. Depth ranges are 2–16; folder files 200–20000; vault files 500–50000; per note 64 KB–8 MB; total 8–512 MB. Invalid settings fall back to defaults; finite values are clamped. **Standard** restores defaults; **Large vault** uses 20000 vault files, 1 MB per note and 256 MB total. Click **Rescan** after changing limits. Scanning lists entries; indexing reads content and can take longer at higher budgets. Truncation shows the applied file limit, and incomplete indexes remain visibly partial.
+
+The optional desktop companion uses Obsidian's cached metadata and SSE updates instead of browser scanning/indexing. Version 0.2 supports opt-in auto-save of existing Markdown notes with pairing tokens, native editor occupancy checks and revision-guarded writes. Ctrl+S saves the active file; export stays separate. Direct FSA writes pause while the bridge is connected. Request or stream failure restores the mounted FSA folder. See [build, manual install, BRAT release assets and user-operated acceptance](obsidian-plugin/README.md). No release is published automatically.
 
 ## Revision mode
 
@@ -235,7 +259,7 @@ Documents under `examples/` are bundled into the app, loadable from the sidebar'
 | Markdown pipeline | unified (remark-parse → remark-gfm / math / frontmatter → remark-rehype → rehype-raw / slug / katex / highlight) |
 | Math and code | KaTeX, lowlight / highlight.js (common languages only) |
 | Styling | Plain CSS with custom properties (`--ui-scale`, `--ui-width`, `--doc-font`); no UI framework |
-| Testing | Vitest — 439 cases across 31 files: rendering pipeline, revisions, export, i18n, shortcuts, tabs, storage, the vault index and the workspace write queue |
+| Testing | Vitest — 471 cases across 33 files: rendering pipeline, revisions, export, i18n, shortcuts, tabs, storage, the vault index and the workspace write queue |
 | Static analysis | oxlint + `tsc -b` |
 
 There is no backend at runtime: documents and preferences live in localStorage, directory handles in IndexedDB, and export goes through the browser's download flow.

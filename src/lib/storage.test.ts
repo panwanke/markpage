@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createDocument, loadDocuments, loadSettings } from './storage'
+import { createDocument, loadDocuments, loadSettings, saveSettings, DEFAULT_SCAN_LIMITS, normalizeScanLimits } from './storage'
 
 const DOCUMENTS_KEY = 'markpage.documents.v1'
 const SETTINGS_KEY = 'markpage.settings.v1'
@@ -136,4 +136,29 @@ describe('工作空间绑定与插件设置', () => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ editorMode: 'wysiwyg' }))
     expect(loadSettings().editorMode).toBe('rendered')
   })
+})
+
+describe('scan limit and plugin override storage', () => {
+  it('round trips plugin overrides, clears and scan budgets', () => {
+    const settings = loadSettings()
+    settings.keymap['plugin:example'] = 'Mod+Alt+9'
+    settings.keymap['plugin:cleared'] = ''
+    settings.scanLimits.folderFiles = 800
+    saveSettings(settings)
+    expect(loadSettings().keymap).toEqual(settings.keymap)
+    expect(loadSettings().scanLimits.folderFiles).toBe(800)
+  })
+  it('fills missing values, rejects invalid inputs and clamps finite values', () => {
+    expect(normalizeScanLimits(null)).toEqual(DEFAULT_SCAN_LIMITS)
+    expect(normalizeScanLimits({ folderDepth: 100, folderFiles: -1, vaultFiles: 1, noteBytes: '999', totalBytes: NaN })).toEqual({ ...DEFAULT_SCAN_LIMITS, folderDepth: 16, vaultFiles: 500 })
+  })
+})
+
+it('restores read-only bridge provenance without synthesizing a write binding', () => {
+  const valid = { ...createDocument('body'), bridgeSource: { vaultId: 'test', path: 'A.md', hash: 'hash' } }
+  localStorage.setItem(DOCUMENTS_KEY, JSON.stringify([valid, { ...valid, bridgeSource: { vaultId: 'test', path: '../secret', hash: 'hash' } }]))
+  const documents = loadDocuments()
+  expect(documents[0].bridgeSource).toEqual(valid.bridgeSource)
+  expect(documents[0].binding).toBeUndefined()
+  expect(documents[1].bridgeSource).toBeUndefined()
 })

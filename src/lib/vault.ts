@@ -141,6 +141,8 @@ function inferAttachmentFolder(assets: Map<string, FileSystemFileHandle>): strin
 }
 
 export interface ScanVaultOptions {
+  maxFiles?: number
+  maxDepth?: number
   /** 已识别过的库配置；显式传 `null` 表示普通文件夹，不再重复探测 `.obsidian`。 */
   config?: VaultConfig | null
 }
@@ -153,7 +155,7 @@ export async function scanVault(root: FileSystemDirectoryHandle, options: ScanVa
 
   const walk = async (handle: FileSystemDirectoryHandle, prefix: string, depth: number) => {
     for await (const child of handle.values()) {
-      if (entries.length >= VAULT_MAX_FILES) {
+      if (entries.length >= (options.maxFiles ?? VAULT_MAX_FILES)) {
         truncated = true
         return
       }
@@ -166,7 +168,7 @@ export async function scanVault(root: FileSystemDirectoryHandle, options: ScanVa
         }
         continue
       }
-      if (depth >= VAULT_MAX_DEPTH) continue
+      if (depth >= (options.maxDepth ?? VAULT_MAX_DEPTH)) continue
       if (child.name.startsWith('.') || SKIP_DIRECTORIES.has(child.name)) continue
       await walk(child as FileSystemDirectoryHandle, path, depth + 1)
     }
@@ -366,7 +368,7 @@ export async function clearVaultCache(vault?: string) {
       const transaction = db.transaction(STORE, 'readwrite')
       const store = transaction.objectStore(STORE)
       if (vault && typeof IDBKeyRange !== 'undefined') {
-        const prefix = `${vault}${SEP}`
+        const prefix = `${vault}@`
         store.delete(IDBKeyRange.bound(prefix, `${prefix}\uffff`))
       } else {
         store.clear()
@@ -389,6 +391,8 @@ export interface BuildIndexOptions {
   vault?: string
   /** 总量上限，默认 `VAULT_MAX_TOTAL_BYTES`；测试用它把预算压到几百字节。 */
   maxBytes?: number
+  maxFileBytes?: number
+  truncated?: boolean
 }
 
 /**
@@ -397,14 +401,14 @@ export interface BuildIndexOptions {
  */
 export async function buildVaultIndex(entries: LocalFileEntry[], options: BuildIndexOptions = {}): Promise<LinkIndex> {
   const index = emptyLinkIndex()
-  const vault = options.vault ?? ''
+  const vault = `${options.vault ?? ''}@${options.maxFileBytes ?? VAULT_MAX_FILE_BYTES}:${options.maxBytes ?? VAULT_MAX_TOTAL_BYTES}`
   const cache = options.useCache === false ? new Map<string, CachedFile>() : await loadCache(vault)
   const fresh = new Map<string, CachedFile>()
   const parsed = new Map<string, CachedFile>()
   const budget = options.maxBytes ?? VAULT_MAX_TOTAL_BYTES
   const total = entries.length
   let done = 0
-  let partial = false
+  let partial = options.truncated === true
   let bytes = 0
 
   for (const entry of entries) {
@@ -417,7 +421,7 @@ export async function buildVaultIndex(entries: LocalFileEntry[], options: BuildI
         cached = hit
         // 跳过状态也会缓存；命中时必须把 partial 一起带回来，否则第二次建索引会假装完整。
         if (!hit.complete) partial = true
-      } else if (file.size > VAULT_MAX_FILE_BYTES || bytes + file.size > budget) {
+      } else if (file.size > (options.maxFileBytes ?? VAULT_MAX_FILE_BYTES) || bytes + file.size > budget) {
         partial = true
         cached = {
           mtime: file.lastModified,
@@ -496,7 +500,7 @@ export async function buildVaultIndex(entries: LocalFileEntry[], options: BuildI
   index.partial = partial
   void saveCache(fresh, vault)
   // 扫描已经触顶时不清理：这次没看到的文件不是「没了」，删了下次还得重读。
-  if (vault && options.useCache !== false && entries.length < VAULT_MAX_FILES) {
+  if (vault && options.useCache !== false && !options.truncated && !options.signal?.aborted) {
     void pruneCache(vault, new Set(parsed.keys()))
   }
   return index
@@ -504,6 +508,7 @@ export async function buildVaultIndex(entries: LocalFileEntry[], options: BuildI
 
 /** 单篇笔记的「本文没有解析到的链接」。 */
 export function unresolvedLinks(index: LinkIndex, path: string): LinkReference[] {
+  if (index.unresolved) return index.unresolved.get(path) ?? []
   const links = index.outgoing.get(path) ?? []
   return links.filter((reference) => !resolveWikilink({ note: reference.target }, path, index))
 }

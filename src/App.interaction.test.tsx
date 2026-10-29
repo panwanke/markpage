@@ -8,6 +8,7 @@ import ShortcutSettings from './components/ShortcutSettings'
 import { createDocument, DEFAULT_SETTINGS } from './lib/storage'
 import { DEFAULT_KEYMAP } from './lib/shortcuts'
 import type { Keymap } from './lib/shortcuts'
+import { focusModePlugin } from './plugins/builtin'
 import { setLocale, t } from './i18n'
 
 let root: Root | undefined
@@ -252,7 +253,7 @@ describe('toolbar and export shortcut integration', () => {
 
   it('dispatches all three export shortcuts from source with the current bindings', async () => {
     await mount('one two', { keymap: {
-      ...DEFAULT_KEYMAP, 'file.exportDirect': 'Mod+Alt+E',
+      ...DEFAULT_KEYMAP, 'file.save': '', 'file.exportDirect': 'Mod+Alt+E',
       'file.exportClean': 'Mod+Alt+Shift+E', 'file.exportCustom': 'Mod+Alt+U',
     } })
     const createObjectURL = vi.fn(() => 'blob:test')
@@ -337,5 +338,84 @@ describe('Obsidian Live Editing plugin', () => {
     expect(host.querySelector('.paper-page')).toBeTruthy()
     // 只渲染一种视图：不允许纸张与源码栏同时存在（幽灵双栏）。
     expect(host.querySelector('.source-editor')).toBeNull()
+  })
+})
+
+describe('plugin shortcut lifecycle', () => {
+  const original = focusModePlugin.activate
+  let defaultBinding = 'Mod+Shift+K'
+  let allowWhileTyping = false
+  beforeEach(() => {
+    defaultBinding = 'Mod+Shift+K'; allowWhileTyping = false
+    focusModePlugin.activate = api => { api.registerCommand({ id: 'focus-mode.toggle', title: 'Plugin focus', defaultBinding, allowWhileTyping, run: () => window.dispatchEvent(new CustomEvent('markpage:focus-mode')) }) }
+  })
+  afterEach(() => { focusModePlugin.activate = original })
+  const focused = () => host.querySelector('.app-shell')!.classList.contains('focus-mode')
+  it('dispatches defaults, shows menu labels and guards typing, capture and modals', async () => {
+    await mount()
+    await press(source(), 'k', { ctrlKey: true, shiftKey: true })
+    expect(focused()).toBe(false)
+    await press(window, 'k', { ctrlKey: true, shiftKey: true })
+    expect(focused()).toBe(true)
+    await click(buttonWithText('.menubar-trigger', 'Plugins'))
+    expect(host.querySelector('.menubar-dropdown')?.textContent).toContain('Ctrl+Shift+K')
+    await press(document, 'Escape')
+    await press(window, '/', { ctrlKey: true })
+    await press(window, 'k', { ctrlKey: true, shiftKey: true })
+    expect(focused()).toBe(true)
+    const row = Array.from(host.querySelectorAll('.shortcut-row')).find(row => row.textContent?.includes('Plugin focus'))!
+    await click(row.querySelector<HTMLButtonElement>('.shortcut-chip')!)
+    await press(window, '9', { ctrlKey: true, altKey: true })
+    expect(focused()).toBe(true)
+    await press(document, 'Escape')
+    await press(window, 'k', { ctrlKey: true, shiftKey: true })
+    expect(focused()).toBe(true)
+    await press(window, '9', { ctrlKey: true, altKey: true })
+    expect(focused()).toBe(false)
+    await act(() => { vi.advanceTimersByTime(500) })
+    const saved = JSON.parse(localStorage.getItem('markpage.settings.v1')!)
+    expect(saved.keymap['plugin:focus-mode.toggle']).toBe('Mod+Alt+9')
+  })
+  it('keeps a conflicting plugin unbound with an actionable explanation', async () => {
+    defaultBinding = 'Mod+B'
+    await mount()
+    expect((await press(window, 'b', { ctrlKey: true })).defaultPrevented).toBe(false)
+    expect(focused()).toBe(false)
+    await press(window, '/', { ctrlKey: true })
+    const row = Array.from(host.querySelectorAll('.shortcut-row')).find(row => row.textContent?.includes('Plugin focus'))!
+    expect(row.textContent).toContain('Bold')
+    expect(row.textContent).toContain(t('settings.shortcuts.unassigned'))
+  })
+  it('retains a cleared override across refresh', async () => {
+    await mount('one', { keymap: { ...DEFAULT_KEYMAP, 'plugin:focus-mode.toggle': '' } })
+    await press(window, 'k', { ctrlKey: true, shiftKey: true })
+    expect(focused()).toBe(false)
+    await act(() => { vi.advanceTimersByTime(500) })
+    await act(() => root!.unmount())
+    root = createRoot(host)
+    await act(() => root!.render(<App />))
+    await press(window, 'k', { ctrlKey: true, shiftKey: true })
+    expect(focused()).toBe(false)
+  })
+  it('restores a custom override after disabling and reenabling the plugin', async () => {
+    await mount('one', { keymap: { ...DEFAULT_KEYMAP, 'plugin:focus-mode.toggle': 'Mod+Alt+9' } })
+    await press(window, '/', { ctrlKey: true })
+    await click(buttonWithText('.settings-sidebar button', 'Plugins'))
+    await click(host.querySelector<HTMLButtonElement>('.plugin-row .plugin-toggle')!)
+    await press(document, 'Escape')
+    await press(window, '9', { ctrlKey: true, altKey: true })
+    expect(focused()).toBe(false)
+    await press(window, '/', { ctrlKey: true })
+    await click(buttonWithText('.settings-sidebar button', 'Plugins'))
+    await click(host.querySelector<HTMLButtonElement>('.plugin-row .plugin-toggle')!)
+    await press(document, 'Escape')
+    await press(window, '9', { ctrlKey: true, altKey: true })
+    expect(focused()).toBe(true)
+  })
+  it('allows explicitly opted-in commands in text inputs', async () => {
+    allowWhileTyping = true
+    await mount()
+    await press(source(), 'k', { ctrlKey: true, shiftKey: true })
+    expect(focused()).toBe(true)
   })
 })

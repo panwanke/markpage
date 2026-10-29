@@ -13,6 +13,9 @@ import type { LinkIndex } from './links'
 export interface IndexJobRequest {
   entries: LocalFileEntry[]
   useCache: boolean
+  maxFileBytes?: number
+  maxBytes?: number
+  truncated?: boolean
   /** 库标识：让不同库的同名路径不会互相命中缓存（见 `vaultFingerprint`）。 */
   vault: string
 }
@@ -30,6 +33,9 @@ export async function runIndexJob(
     const index = await buildVaultIndex(request.entries, {
       useCache: request.useCache,
       vault: request.vault,
+      maxFileBytes: request.maxFileBytes,
+      maxBytes: request.maxBytes,
+      truncated: request.truncated,
       onProgress: (done, total) => post({ type: 'progress', done, total }),
     })
     post({ type: 'done', index })

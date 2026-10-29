@@ -5,11 +5,23 @@ import type { MessageKey } from '../i18n'
 import { FOCUS_MODE_PLUGIN_ID, OBSIDIAN_LIVE_EDITING_PLUGIN_ID } from '../plugins/ids'
 import { DOC_FONTS, UI_FONTS, UI_SCALE_MAX, UI_SCALE_MIN } from '../lib/fonts'
 import { useEscape } from '../lib/useEscape'
-import type { Keymap } from '../lib/shortcuts'
-import type { PageConfig } from '../types'
+import type { BindingConflict, CommandBindingSource, Keymap } from '../lib/shortcuts'
+import type { PageConfig, ScanLimits } from '../types'
 import ShortcutSettings from './ShortcutSettings'
+import ScanLimitSettings from './ScanLimitSettings'
+import { DEFAULT_BRIDGE_PORT } from '../lib/vault-bridge'
 
 interface SettingsModalProps {
+  bridgeStatus: 'disconnected' | 'connecting' | 'permission' | 'connected' | 'failed'
+  bridgeWriteAccess?: 'disabled' | 'token-required' | 'token-invalid' | 'granted'
+  bridgeName?: string
+  bridgeError?: string
+  onConnectBridge: (port: number, token: string) => void
+  onDisconnectBridge: () => void
+  scanLimits: ScanLimits
+  appliedScanLimits?: ScanLimits
+  onScanLimits: (limits: ScanLimits) => void
+  onRescan: () => void
   config: PageConfig
   userName: string
   locale: string
@@ -17,6 +29,8 @@ interface SettingsModalProps {
   uiScale: number
   docFont: string
   keymap: Keymap
+  pluginCommands?: readonly CommandBindingSource[]
+  bindingConflicts?: readonly BindingConflict[]
   /** 内置插件清单：由宿主从注册表派生，启停状态即注册表真实状态。 */
   plugins: Array<{ id: string; name: string; description: string; version: string; enabled: boolean }>
   /** Obsidian 语法增强：关掉后双链 / callout / 嵌入按普通 Markdown 渲染。 */
@@ -61,6 +75,16 @@ const PLUGIN_TEXT: Record<string, { name: MessageKey; description: MessageKey }>
 const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'
 
 export default function SettingsModal({
+  bridgeStatus,
+  bridgeName,
+  bridgeWriteAccess,
+  bridgeError,
+  onConnectBridge,
+  onDisconnectBridge,
+  scanLimits,
+  appliedScanLimits,
+  onScanLimits,
+  onRescan,
   config,
   userName,
   locale,
@@ -68,6 +92,8 @@ export default function SettingsModal({
   uiScale,
   docFont,
   keymap,
+  pluginCommands,
+  bindingConflicts,
   plugins,
   obsidianSyntax,
   watchDisk,
@@ -85,6 +111,8 @@ export default function SettingsModal({
   onClose,
 }: SettingsModalProps) {
   const { t, locales, localeId } = useI18n()
+  const [writeToken, setWriteToken] = useState('')
+  const [bridgePort, setBridgePort] = useState(DEFAULT_BRIDGE_PORT)
   const [tab, setTab] = useState<SettingsTab>(initialTab)
   useEscape(onClose)
   return (
@@ -188,7 +216,7 @@ export default function SettingsModal({
             </div>
             <div className="frontmatter-hint"><Braces size={16} /><code>header: {config.header || '…'}  ·  footer: {config.footer || '…'}  ·  paper: {config.paper}</code></div>
           </>}
-          {tab === 'shortcuts' && <ShortcutSettings keymap={keymap} onChange={onKeymap} />}
+          {tab === 'shortcuts' && <ShortcutSettings keymap={keymap} pluginCommands={pluginCommands} conflicts={bindingConflicts} onChange={onKeymap} />}
           {tab === 'language' && <>
             <div className="settings-title"><h2>{t('settings.language.title')}</h2><p>{t('settings.language.hint')}</p></div>
             <div className="settings-section">
@@ -220,6 +248,19 @@ export default function SettingsModal({
             </div>
           </>}
           {tab === 'vault' && <>
+            <div className="settings-section">
+              <h3>{t('bridge.title')}</h3>
+              <p role="status">{t(`bridge.status.${bridgeStatus}`, { name: bridgeName ?? '' })}</p>
+              {bridgeStatus === 'connected' && bridgeWriteAccess && <p role="status">{t(`bridge.access.${bridgeWriteAccess}`)}</p>}
+              <p>{t('bridge.writeInstructions')}</p>
+              <label className="settings-field"><span>{t('bridge.port')}</span><input type="number" min="1024" max="65535" value={bridgePort} onChange={(event) => setBridgePort(Number(event.target.value))} /></label>
+              <label className="settings-field"><span>{t('bridge.token')}</span><input type="password" autoComplete="off" value={writeToken} onChange={event => setWriteToken(event.target.value)} /></label>
+              <button className="reset-appearance" disabled={!Number.isInteger(bridgePort) || bridgePort < 1024 || bridgePort > 65535 || bridgeStatus === 'connecting'} onClick={() => onConnectBridge(bridgePort, writeToken)}>{t('bridge.connect')}</button>
+              <button className="reset-appearance" disabled={bridgeStatus === 'disconnected'} onClick={onDisconnectBridge}>{t('bridge.disconnect')}</button>
+              {bridgeError && <p role="alert">{bridgeError}</p>}
+              <p>{t('bridge.hint')}</p>
+            </div>
+            <ScanLimitSettings limits={scanLimits} applied={appliedScanLimits} onChange={onScanLimits} onRescan={onRescan} />
             <div className="settings-title"><h2>{t('settings.vault.title')}</h2><p>{t('settings.vault.hint')}</p></div>
             <div className="settings-section">
               <h3><Library size={13} /> {t('settings.vault.syntax')}</h3>
@@ -253,7 +294,7 @@ export default function SettingsModal({
           </>}
           {tab === 'plugins' && <>
             <div className="settings-title"><h2>{t('settings.plugins.title')}</h2><p>{t('settings.plugins.hint')}</p></div>
-            <div className="plugin-hero"><span><Puzzle size={26} /></span><div><strong>Plugin API 1.1</strong><p>{t('settings.plugins.api')}</p></div></div>
+            <div className="plugin-hero"><span><Puzzle size={26} /></span><div><strong>Plugin API 1.2</strong><p>{t('settings.plugins.api')}</p></div></div>
             <div className="settings-section">
               <h3>{t('settings.plugins.builtin')}</h3>
               {plugins.map((plugin) => {

@@ -824,3 +824,9 @@ body.is-resizing-columns .source-editor { pointer-events: none; }
 .status-index { color: #9a96a3; }
 .disk-changed-chip { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 9px; background: #fff3e0; color: #b25d00; font-size: calc(10px * var(--ui-scale)); font-weight: 600; }
 .disk-changed-chip:hover { background: #ffe8cc; }
+
+.scan-summary { display: block; margin: 8px 0 12px; color: var(--text-muted); line-height: 1.6; }
+
+.bridge-comparison { max-width: 900px; padding: 24px; overflow: auto; max-height: 90vh; }
+.bridge-comparison label { display: block; margin: 12px 0; }
+.bridge-comparison textarea { display: block; width: 100%; min-height: 140px; font-family: monospace; }

@@ -103,3 +103,12 @@ describe('目录扫描', () => {
     expect(truncated).toBe(false)
   })
 })
+
+it('supports custom folder depth and file limits without breaking the numeric overload', async () => {
+  const tree = toHandle(directory('root', [file('A.md'), directory('one', [directory('two', [file('Deep.md')])])]))
+  const shallow = await scanDirectory(tree, { depth: 2 })
+  expect(shallow.entries.map(file => file.path)).toEqual(['A.md'])
+  expect((await scanDirectory(tree, { depth: 3 })).entries).toHaveLength(2)
+  expect((await scanDirectory(tree, { depth: 3, limit: 1 })).truncated).toBe(true)
+  expect((await scanDirectory(tree, 1)).entries).toHaveLength(1)
+})

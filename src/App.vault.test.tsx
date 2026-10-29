@@ -366,3 +366,26 @@ describe('写回与冲突', () => {
     expect(sourceValue()).toBe('原文\n')
   })
 })
+
+it('applies configured folder limits only after an explicit rescan and displays the applied count', async () => {
+  await mountApp()
+  const vault = createFakeVault(Object.fromEntries(Array.from({ length: 801 }, (_, index) => [`Note${index}.md`, 'text'])))
+  Object.defineProperty(window, 'showDirectoryPicker', { configurable: true, value: vi.fn(async () => vault.handle) })
+  await click(Array.from(host.querySelectorAll('.panel-action')).find(node => node.textContent?.trim() === 'Folder'))
+  await waitFor(() => Boolean(host.querySelector('.local-folder')), 'folder mounted')
+  await act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true, bubbles: true })) })
+  await click(Array.from(host.querySelectorAll('.settings-sidebar button')).find(node => node.textContent?.trim() === 'Obsidian'))
+  const details = host.querySelector('.settings-section details') as HTMLDetailsElement
+  expect(details).toBeTruthy()
+  await act(() => { details.open = true })
+  const field = Array.from(details.querySelectorAll('label')).find(label => label.textContent?.includes('File limit'))!.querySelector('input')!
+  await act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, '800')
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(host.textContent).toContain('Limits changed. Rescan to apply.')
+  expect(host.querySelector('.local-folder')?.textContent).not.toContain('first 800')
+  await click(Array.from(host.querySelectorAll('button')).find(node => node.textContent?.trim() === 'Rescan'))
+  await waitFor(() => Boolean(host.querySelector('.local-folder')?.textContent?.includes('800')), 'applied scan limit')
+  expect(host.textContent).not.toContain('Limits changed. Rescan to apply.')
+})

@@ -16,6 +16,7 @@ export type CommandId =
   | 'file.openFolder'
   | 'file.openRecent'
   | 'file.disconnectFolder'
+  | 'file.save'
   | 'file.exportDirect'
   | 'file.exportClean'
   | 'file.exportCustom'
@@ -68,7 +69,8 @@ export const COMMANDS: readonly CommandDefinition[] = [
   { id: 'file.openFolder', group: 'file', labelKey: 'cmd.openFolder', defaultBinding: '' },
   { id: 'file.openRecent', group: 'file', labelKey: 'cmd.openRecent', defaultBinding: '' },
   { id: 'file.disconnectFolder', group: 'file', labelKey: 'cmd.disconnectFolder', defaultBinding: '' },
-  { id: 'file.exportDirect', group: 'file', labelKey: 'cmd.exportDirect', defaultBinding: 'Mod+S' },
+  { id: 'file.save', group: 'file', labelKey: 'cmd.save', defaultBinding: 'Mod+S' },
+  { id: 'file.exportDirect', group: 'file', labelKey: 'cmd.exportDirect', defaultBinding: '' },
   { id: 'file.exportClean', group: 'file', labelKey: 'cmd.exportClean', defaultBinding: 'Mod+Shift+S' },
   { id: 'file.exportCustom', group: 'file', labelKey: 'cmd.exportCustom', defaultBinding: 'Mod+Alt+S' },
   { id: 'file.print', group: 'file', labelKey: 'cmd.print', defaultBinding: 'Mod+P' },
@@ -113,7 +115,72 @@ export const COMMANDS: readonly CommandDefinition[] = [
 ]
 
 /** 命令 id → 键位；空串表示这一条有意留空。 */
-export type Keymap = Record<CommandId, string>
+export type PluginCommandId = `plugin:${string}`
+export type AnyCommandId = CommandId | PluginCommandId
+export type Keymap = Record<CommandId, string> & Partial<Record<PluginCommandId, string>>
+
+export interface CommandBindingSource {
+  id: AnyCommandId
+  defaultBinding: string
+  labelKey?: MessageKey
+  title?: string
+  allowWhileTyping?: boolean
+}
+
+export interface BindingConflict {
+  id: AnyCommandId
+  binding: string
+  ownerId: AnyCommandId
+  ownerLabelKey?: MessageKey
+  ownerTitle?: string
+}
+
+export function bindingOf(keymap: Keymap, id: AnyCommandId): string {
+  return keymap[id] ?? ''
+}
+
+export function isReservedBinding(binding: string): boolean {
+  return /^Mod\+(?:N|T|W|[1-9])$/.test(normalizeBinding(binding))
+}
+
+export function isValidPluginBinding(binding: string): boolean {
+  return isValidBinding(binding) && !isReservedBinding(binding)
+}
+
+/** Defaults are derived only; explicit overrides, including empty strings, stay in storage. */
+export function mergeCommandBindings(keymap: Keymap, sources: readonly CommandBindingSource[]) {
+  const effective = { ...keymap }
+  const conflicts: BindingConflict[] = []
+  const occupied = new Map<string, CommandBindingSource>()
+  const explicit = [
+    ...COMMANDS.filter((command) => bindingOf(keymap, command.id) !== command.defaultBinding),
+    ...sources.filter((command) => Object.hasOwn(keymap, command.id)),
+  ]
+  for (const command of explicit) {
+    const binding = normalizeBinding(bindingOf(keymap, command.id))
+    if (binding && !occupied.has(binding)) occupied.set(binding, command)
+  }
+  for (const command of COMMANDS) {
+    if (bindingOf(keymap, command.id) !== command.defaultBinding) continue
+    const binding = command.defaultBinding
+    if (binding && occupied.has(binding)) effective[command.id] = ''
+    else if (binding) occupied.set(binding, command)
+  }
+  for (const command of sources) {
+    if (Object.hasOwn(keymap, command.id)) continue
+    effective[command.id] = ''
+    const binding = normalizeBinding(command.defaultBinding)
+    if (!binding || !isValidPluginBinding(binding)) continue
+    const owner = occupied.get(binding)
+    if (owner) {
+      conflicts.push({ id: command.id, binding, ownerId: owner.id, ownerLabelKey: owner.labelKey, ownerTitle: owner.title })
+    } else {
+      effective[command.id] = binding
+      occupied.set(binding, command)
+    }
+  }
+  return { keymap: effective, conflicts }
+}
 
 /** 菜单栏的分组顺序，设置面板也按这个顺序列，两处口径一致。 */
 export const MENU_GROUPS: { id: CommandGroup; labelKey: MessageKey }[] = [
@@ -260,13 +327,22 @@ export function normalizeKeymap(raw: unknown): Keymap {
     const normalized = normalizeBinding(value)
     if (normalized && isValidBinding(normalized)) result[command.id] = normalized
   }
+  for (const [id, value] of Object.entries(source)) {
+    if (!/^plugin:.+$/.test(id) || typeof value !== 'string') continue
+    const normalized = normalizeBinding(value)
+    if (value.trim() === '' || (normalized && isValidPluginBinding(normalized))) {
+      result[id as PluginCommandId] = normalized
+    }
+  }
+  // Migrate the old default export shortcut while preserving explicit save overrides.
+  if (!Object.prototype.hasOwnProperty.call(source, 'file.save') && normalizeBinding(String(source['file.exportDirect'] ?? '')) === 'Mod+S') result['file.exportDirect'] = ''
   return result
 }
 
 /** 键位 → 命令的索引；重复绑定先到先得，冲突由设置面板拦下来。 */
-export function bindingIndex(keymap: Keymap): Map<string, CommandId> {
-  const index = new Map<string, CommandId>()
-  for (const command of COMMANDS) {
+export function bindingIndex(keymap: Keymap, sources: readonly CommandBindingSource[] = []): Map<string, AnyCommandId> {
+  const index = new Map<string, AnyCommandId>()
+  for (const command of [...COMMANDS, ...sources]) {
     const binding = normalizeBinding(keymap[command.id] ?? '')
     if (!binding || index.has(binding)) continue
     index.set(binding, command.id)
@@ -291,18 +367,18 @@ const ALIASES: Partial<Record<CommandId, string[]>> = {
   'edit.redo': ['Mod+Y'],
 }
 
-export function findConflict(keymap: Keymap, id: CommandId, binding: string): CommandDefinition | null {
+export function findConflict(keymap: Keymap, id: AnyCommandId, binding: string, sources: readonly CommandBindingSource[] = []): CommandBindingSource | null {
   const target = normalizeBinding(binding)
   if (!target) return null
-  for (const command of COMMANDS) {
+  for (const command of [...COMMANDS, ...sources]) {
     if (command.id === id) continue
     if (normalizeBinding(keymap[command.id] ?? '') === target) return command
   }
   return null
 }
 
-export function assignBinding(keymap: Keymap, id: CommandId, binding: string) {
-  const conflict = findConflict(keymap, id, binding)
+export function assignBinding(keymap: Keymap, id: AnyCommandId, binding: string, sources: readonly CommandBindingSource[] = []) {
+  const conflict = findConflict(keymap, id, binding, sources)
   return { conflict, keymap: conflict ? keymap : { ...keymap, [id]: normalizeBinding(binding) } }
 }
 
@@ -315,9 +391,9 @@ export function isShortcutCapturing() { return capturing }
  * 焦点在输入框 / 文本域 / 可编辑区时，只放行这些命令。
  * 撤销、删除、加粗这类交给浏览器原生行为，拦截反而会把内容弄乱。
  */
-export const ALLOWED_WHILE_TYPING = new Set<CommandId>([
+export const ALLOWED_WHILE_TYPING = new Set<AnyCommandId>([
   'file.new', 'file.import', 'file.openFolder', 'file.openRecent', 'file.disconnectFolder',
-  'file.exportDirect', 'file.exportClean', 'file.exportCustom',
+  'file.save', 'file.exportDirect', 'file.exportClean', 'file.exportCustom',
   'file.print', 'file.settings', 'revision.toggle', 'help.shortcuts',
   'view.rendered', 'view.split', 'view.source', 'view.paged', 'view.continuous',
   'view.sidebar', 'view.comments', 'view.focus',
@@ -330,10 +406,10 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
   if (!element || typeof element.tagName !== 'string') return false
   const tag = element.tagName.toLowerCase()
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
-  return element.isContentEditable === true
+  return element.isContentEditable === true || Boolean(element.closest?.('[contenteditable="true"]'))
 }
 
-export const SOURCE_COMMANDS = new Set<CommandId>([
+export const SOURCE_COMMANDS = new Set<AnyCommandId>([
   'edit.undo', 'edit.redo', 'edit.deleteSelection',
   'format.bold', 'format.strike', 'format.highlight', 'format.code', 'format.clear', 'format.comment',
   'revision.markDelete', 'revision.insert', 'revision.acceptAll', 'revision.rejectAll',
@@ -344,7 +420,7 @@ export const SOURCE_COMMANDS = new Set<CommandId>([
 type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>
   & Partial<Pick<KeyboardEvent, 'defaultPrevented' | 'isComposing'>>
 
-export function commandForKeyEvent(event: ShortcutEvent, index: Map<string, CommandId>): CommandId | undefined {
+export function commandForKeyEvent(event: ShortcutEvent, index: Map<string, AnyCommandId>): AnyCommandId | undefined {
   if (event.defaultPrevented || event.isComposing || isShortcutCapturing()) return undefined
   return index.get(eventToBinding(event))
 }

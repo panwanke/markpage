@@ -198,3 +198,22 @@ describe('Live Editing 编辑器', () => {
     expect(first.querySelector('.cm-live-strong')?.textContent).toBe('粗体')
   })
 })
+
+it('refreshes the command index when the plugin command table changes with the same keymap', async () => {
+  const keymap = { ...DEFAULT_KEYMAP, 'plugin:fixture': 'Mod+Shift+K' }
+  const command = { id: 'plugin:fixture' as const, title: 'Fixture', defaultBinding: '', allowWhileTyping: true }
+  const onCommand = vi.fn(() => true)
+  const render = (pluginCommands: typeof command[]) => <LivePreviewEditor documentId="test" markdown="text" revisionMode={false} keymap={keymap} pluginCommands={pluginCommands} commitEdit={next => ({ markdown: next, caret: 0 })} onSelection={() => {}} onCommand={onCommand} />
+  root = createRoot(host)
+  await act(() => root!.render(render([])))
+  const press = () => host.querySelector('.cm-content')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))
+  await act(() => { press() })
+  expect(onCommand).not.toHaveBeenCalled()
+  await act(() => root!.render(render([command])))
+  await act(() => { press() })
+  expect(onCommand).toHaveBeenCalledWith('plugin:fixture', expect.any(Object))
+  await act(() => root!.render(render([{ ...command, allowWhileTyping: false }])))
+  onCommand.mockClear()
+  await act(() => { press() })
+  expect(onCommand).not.toHaveBeenCalled()
+})

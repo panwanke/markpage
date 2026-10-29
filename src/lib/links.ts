@@ -46,6 +46,9 @@ export interface LinkReference {
 }
 
 export interface LinkIndex {
+  /** Authoritative Obsidian resolutions, including explicit unresolved targets. */
+  resolved?: Map<string, Record<string, string | null>>
+  unresolved?: Map<string, LinkReference[]>
   /** 小写文件名（不含扩展名）→ 路径列表。 */
   byTitle: Map<string, string[]>
   /** 小写完整路径（含 / 不含扩展名两种写法）→ 路径。 */
@@ -163,6 +166,11 @@ export function resolveWikilink(
   fromPath: string,
   index: LinkIndex,
 ): ResolvedLink | null {
+  const authoritative = index.resolved?.get(fromPath)
+  if (authoritative && Object.hasOwn(authoritative, target.note)) {
+    const path = authoritative[target.note]
+    return path ? { path, ambiguous: false } : null
+  }
   const note = normalizeVaultPath(target.note)
   if (!note) return fromPath ? { path: fromPath, ambiguous: false } : null
 
@@ -208,6 +216,11 @@ export function resolveMarkdownLink(href: string, fromPath: string, index: LinkI
   // 渲染出来的 href 是百分号编码的（中文标题尤其明显），锚点要还原成文字才能按标题找。
   const anchor = hash >= 0 ? decodePart(raw.slice(hash + 1)) : ''
   if (!pathPart) return fromPath ? { path: fromPath, anchor, ambiguous: false } : null
+  const authoritative = index.resolved?.get(fromPath)
+  if (authoritative && Object.hasOwn(authoritative, decodePart(pathPart))) {
+    const path = authoritative[decodePart(pathPart)]
+    return path ? { path, anchor, ambiguous: false } : null
+  }
   const normalized = normalizeVaultPath(pathPart)
   const candidates = [
     normalized,

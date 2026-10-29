@@ -133,8 +133,10 @@ function joinPath(parent: string, name: string) {
 /** 递归扫描目录，最多 MAX_SCAN_DEPTH 层、MAX_SCAN_FILES 个文件，跳过依赖与版本库目录。 */
 export async function scanDirectory(
   root: FileSystemDirectoryHandle,
-  limit = MAX_SCAN_FILES,
+  options: number | { limit?: number; depth?: number } = {},
 ): Promise<ScanResult> {
+  const limit = typeof options === 'number' ? options : options.limit ?? MAX_SCAN_FILES
+  const maxDepth = typeof options === 'number' ? MAX_SCAN_DEPTH : options.depth ?? MAX_SCAN_DEPTH
   const entries: LocalFileEntry[] = []
   const assets = new Map<string, FileSystemFileHandle>()
   // 布尔值放在闭包外，遍历一旦触顶就能让所有层级同时收手。
@@ -155,7 +157,7 @@ export async function scanDirectory(
         }
         continue
       }
-      if (depth >= MAX_SCAN_DEPTH) continue
+      if (depth >= maxDepth) continue
       if (SKIP_DIRECTORIES.has(child.name) || child.name.startsWith('.')) continue
       await walk(child as FileSystemDirectoryHandle, joinPath(prefix, child.name), depth + 1)
     }

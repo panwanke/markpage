@@ -154,3 +154,11 @@ describe('Worker 侧的接线', () => {
     }
   })
 })
+
+it('passes per-note and total budgets through the worker protocol', async () => {
+  const { messages, post } = collect()
+  await runIndexJob({ entries: [entry('A.md', '# Heading')], useCache: false, vault: 'limits', maxFileBytes: 1, maxBytes: 1 }, post)
+  const done = messages.at(-1)
+  expect(done?.type).toBe('done')
+  if (done?.type === 'done') expect(done.index.partial).toBe(true)
+})

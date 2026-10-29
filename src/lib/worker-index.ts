@@ -24,7 +24,7 @@ export function supportsWorkerIndex() {
 
 export function startWorkerIndex(
   entries: LocalFileEntry[],
-  options: { useCache?: boolean; vault?: string; onProgress?: (done: number, total: number) => void } = {},
+  options: { maxFileBytes?: number; maxBytes?: number; truncated?: boolean; useCache?: boolean; vault?: string; onProgress?: (done: number, total: number) => void } = {},
 ): WorkerIndexJob | null {
   if (!supportsWorkerIndex()) return null
   let worker: Worker
@@ -59,7 +59,7 @@ export function startWorkerIndex(
       worker.terminate()
       reject(new Error(event.message || 'worker failed'))
     })
-    const request: IndexJobRequest = { entries, useCache: options.useCache !== false, vault: options.vault ?? '' }
+    const request: IndexJobRequest = { entries, useCache: options.useCache !== false, vault: options.vault ?? '', maxFileBytes: options.maxFileBytes, maxBytes: options.maxBytes, truncated: options.truncated }
     worker.postMessage(request)
   })
 

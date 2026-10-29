@@ -36,9 +36,9 @@ import {
   touchWorkspace,
 } from '../lib/workspace-store'
 import type { WorkspaceStoreState } from '../lib/workspace-store'
-import { downloadMarkdown } from '../lib/storage'
+import { DEFAULT_SCAN_LIMITS, downloadMarkdown } from '../lib/storage'
 import type { MessageKey, MessageParams } from '../i18n'
-import type { DiskBaseline, DiskState, DocumentBinding, MarkdownDocument } from '../types'
+import type { DiskBaseline, DiskState, DocumentBinding, MarkdownDocument, ScanLimits } from '../types'
 
 /** 连续输入只落一次盘：与旧的 600ms 防抖保持一致。 */
 const WRITE_DEBOUNCE = 600
@@ -55,6 +55,8 @@ export interface WorkspaceSession {
   /** 识别到的 Obsidian 配置；普通文件夹为 null。 */
   vaultConfig: VaultConfig | null
   truncated: boolean
+  scanLimits: ScanLimits
+  scanFileLimit: number
   scanning: boolean
   readPermission: PermissionStatus
   writePermission: PermissionStatus
@@ -73,6 +75,8 @@ export interface DiskConflict {
 type Translate = (key: MessageKey, params?: MessageParams) => string
 
 interface UseWorkspaceOptions {
+  writesPaused?: () => boolean
+  scanLimits?: ScanLimits
   /** 取当前文档列表：写盘队列与切根 flush 都从最新状态读。 */
   getDocuments: () => MarkdownDocument[]
   patchDocument: (id: string, patch: Partial<MarkdownDocument>) => void
@@ -171,6 +175,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
 
   /** 真正写一次盘。所有失败路径都必须把改动留在浏览器里。 */
   const performWrite = useCallback(async (id: string) => {
+    if (optionsRef.current.writesPaused?.()) { setDiskState(id, 'readonly'); return }
     const doc = optionsRef.current.getDocuments().find((item) => item.id === id)
     if (!doc?.binding) {
       // 文档被删掉（或解除了绑定）：队列里可能还留着它的状态。
@@ -286,6 +291,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
   const enqueueWrite = useCallback((doc: MarkdownDocument) => {
     const binding = doc.binding
     if (!binding) return
+    if (optionsRef.current.writesPaused?.()) { setDiskState(doc.id, 'readonly'); return }
     if (binding.kind === 'workspace') {
       const current = sessionRef.current
       if (!current || current.id !== binding.workspaceId) return
@@ -310,9 +316,9 @@ export function useWorkspace(options: UseWorkspaceOptions) {
    * 这两种情况都算没落盘。判定必须同时看磁盘状态与最终内容，否则调用方会误以为
    * 可以安全地用磁盘版本覆盖浏览器副本。
    */
-  const flush = useCallback(async (workspaceId?: string) => {
+  const flush = useCallback(async (workspaceId?: string, documentId?: string) => {
     const docs = optionsRef.current.getDocuments().filter((doc) => {
-      if (!doc.binding) return false
+      if (!doc.binding || (documentId !== undefined && doc.id !== documentId)) return false
       if (workspaceId === undefined) return true
       return doc.binding.kind === 'workspace' && doc.binding.workspaceId === workspaceId
     })
@@ -369,6 +375,8 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       assets: new Map(),
       vaultConfig: null,
       truncated: false,
+      scanLimits: { ...(optionsRef.current.scanLimits ?? DEFAULT_SCAN_LIMITS) },
+      scanFileLimit: (optionsRef.current.scanLimits ?? DEFAULT_SCAN_LIMITS).folderFiles,
       scanning: readPermission === 'granted',
       readPermission,
       writePermission,
@@ -384,11 +392,11 @@ export function useWorkspace(options: UseWorkspaceOptions) {
       let scan: ScanResult
       let vaultConfig: VaultConfig | null = null
       if (detected) {
-        const vaultScan = await scanVault(input.handle, { config: detected })
+        const vaultScan = await scanVault(input.handle, { config: detected, maxFiles: base.scanLimits.vaultFiles, maxDepth: base.scanLimits.vaultDepth })
         scan = { entries: vaultScan.entries, assets: vaultScan.assets, truncated: vaultScan.truncated }
         vaultConfig = vaultScan.config ?? detected
       } else {
-        scan = await scanDirectory(input.handle)
+        scan = await scanDirectory(input.handle, { limit: base.scanLimits.folderFiles, depth: base.scanLimits.folderDepth })
       }
       if (token !== scanTokenRef.current) return null
       const next: WorkspaceSession = {
@@ -397,6 +405,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
         assets: scan.assets,
         vaultConfig,
         truncated: scan.truncated,
+        scanFileLimit: detected ? base.scanLimits.vaultFiles : base.scanLimits.folderFiles,
         scanning: false,
       }
       applySession(next)
@@ -559,6 +568,7 @@ export function useWorkspace(options: UseWorkspaceOptions) {
 
   /** 另存到磁盘：已绑定同路径的文档覆盖自己，其余一律找不冲突的新名字。 */
   const saveToDisk = useCallback(async (document: MarkdownDocument): Promise<boolean> => {
+    if (optionsRef.current.writesPaused?.()) return false
     const current = sessionRef.current
     const { notify, t, patchDocument } = optionsRef.current
     if (!current) {

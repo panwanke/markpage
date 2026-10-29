@@ -2,7 +2,7 @@ import { useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef } fr
 import type { CSSProperties, Ref } from 'react'
 import { trackSourceEdit } from '../lib/revision'
 import { bindingIndex, commandForKeyEvent, SOURCE_COMMANDS } from '../lib/shortcuts'
-import type { CommandId, Keymap } from '../lib/shortcuts'
+import type { AnyCommandId, Keymap } from '../lib/shortcuts'
 import type { SelectionSnapshot } from '../types'
 import { sourceSelectionSnapshot } from '../lib/source-selection'
 
@@ -14,7 +14,7 @@ interface SourceEditorProps {
   ref?: Ref<SourceEditorHandle>
   keymap: Keymap
   onSelection: (selection: SelectionSnapshot) => void
-  onCommand: (id: CommandId, selection: SelectionSnapshot) => boolean
+  onCommand: (id: AnyCommandId, selection: SelectionSnapshot) => boolean
   value: string
   /** 无障碍名称。 */
   label: string
